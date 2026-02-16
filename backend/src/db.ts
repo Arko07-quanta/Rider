@@ -1,11 +1,10 @@
-import { Pool } from "pg";
-import dotenv from "dotenv";
+const { Pool } = require("pg");
+require("dotenv").config();
 
-dotenv.config();
-
-const isLocal = process.env.NODE_ENV !== "production";
-
-export const pool = new Pool({
+const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: isLocal ? false : { rejectUnauthorized: false },
 });
+
+module.exports = pool;
+
+export {};  // ← ADD THIS LINE
