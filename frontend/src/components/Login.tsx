@@ -7,23 +7,26 @@ function Login(){
     const [loading,setLoading] = useState<boolean>(false);
     const [error,setError] = useState<string>("");
 
-    const handleSubmit = async(e: React.FormEvent<HTMTLFormElement>) => {
+    const handleSubmit = async(e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         setLoading(true);
         setError("");
         
 
         try{
-            const response = await axios.post("api/login",{email,password});
-            if(response.data.success){
-                localStorage.setItem("token",response.data.token);
-                alert("login successfull!");
-            }else{
-                setError(response.data.message||"login failed!");
+            const response = await axios.post("/api/auth/login",{email,password});
+            console.log(response.data);
+            localStorage.setItem("token",response.data.token);
+            alert(response.data.message);
+        }catch (err: any) {
+            console.log("Axios error:", err);
+            console.log("Axios response:", err.response);
+            if (err.response && err.response.data?.message) {
+              setError(err.response.data.message);
+            } else {
+              setError("Server error. Try again.");
             }
-        }catch(err){
-            setError("server error, please try again!");
-        }finally{
+      }finally{
             setLoading(false);
         }
     };
