@@ -6,8 +6,10 @@ function Home() {
   return (
     <div style={{ textAlign: "center", marginTop: "2rem" }}>
       <h1>Home Page</h1>
-      <p>Welcome! Click the button to go to Dashboard.</p>
-      <button onClick={() => navigate("/dashboard")}>Go to Dashboard</button>
+      <div style={{ marginTop: "2rem" }}>
+        <button onClick={() => navigate("/login")}>Login</button>
+        <button onClick={() => navigate("/signup")}>Signup</button>
+      </div>
     </div>
   );
 }
