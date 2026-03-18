@@ -2,14 +2,10 @@ import React, { useEffect, useState } from "react";
 import api from "../api/axios";
 import "./AdminDashboard.css";
 
-interface PendingDriver {
-  user_id: string;
-  name: string;
-  license_number: string;
-  plate_number: string;
-  model: string;
-  type_name: string;
-}
+import VerificationPanel, { type PendingDriver } from "../components/admin/VerificationPanel";
+import UserManagementPanel from "../components/admin/UserManagementPanel";
+import ActiveRidesPanel from "../components/admin/ActiveRidesPanel";
+import SystemLogsPanel from "../components/admin/SystemLogsPanel";
 
 export default function AdminDashboard() {
   const [activePanel, setActivePanel] = useState("verification");
@@ -85,59 +81,15 @@ export default function AdminDashboard() {
 
         <div className="table-container">
           {activePanel === "verification" && (
-            <>
-              <h2>Drivers Awaiting Approval</h2>
-              {loading ? <p>Loading queue...</p> : (
-                <table className="admin-table">
-                  <thead>
-                    <tr>
-                      <th>Driver Name</th>
-                      <th>License</th>
-                      <th>Vehicle Type</th>
-                      <th>Model/Plate</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {drivers.map((driver) => (
-                      <tr key={driver.user_id}>
-                        <td><strong>{driver.name}</strong></td>
-                        <td><code>{driver.license_number}</code></td>
-                        <td><span className={`tag ${driver.type_name.toLowerCase()}`}>{driver.type_name}</span></td>
-                        <td>{driver.model} ({driver.plate_number})</td>
-                        <td>
-                          <button className="btn-approve" onClick={() => handleVerify(driver.user_id)}>
-                            Approve
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </>
+            <VerificationPanel
+              drivers={drivers}
+              loading={loading}
+              onVerify={handleVerify}
+            />
           )}
-
-          {activePanel === "users" && (
-            <>
-              <h2>User Management</h2>
-              <p>User management content goes here.</p>
-            </>
-          )}
-
-          {activePanel === "rides" && (
-            <>
-              <h2>Active Rides</h2>
-              <p>Active rides content goes here.</p>
-            </>
-          )}
-
-          {activePanel === "logs" && (
-            <>
-              <h2>System Logs</h2>
-              <p>System logs content goes here.</p>
-            </>
-          )}
+          {activePanel === "users" && <UserManagementPanel />}
+          {activePanel === "rides" && <ActiveRidesPanel />}
+          {activePanel === "logs" && <SystemLogsPanel />}
         </div>
       </main>
     </div>
