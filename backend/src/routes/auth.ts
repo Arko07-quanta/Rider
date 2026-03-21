@@ -1,8 +1,8 @@
-export {};
-const express = require("express");
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
-const pool = require("../db.ts");
+import express, { Request, Response } from "express";
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
+import pool from "../db";
+
 const router = express.Router();
 
 
@@ -38,7 +38,7 @@ router.post("/signup", async (req: any, res: any) => {
 
     await client.query('COMMIT');
 
-    const token = jwt.sign({ id: userId, role }, process.env.JWT_SECRET, { expiresIn: '1d' });
+    const token = jwt.sign({ id: userId, role }, process.env.JWT_SECRET as string, { expiresIn: '1d' });
     res.status(201).json({ token, user: { id: userId, role, name } });
 
   } catch (err: any) {
@@ -60,7 +60,10 @@ router.post("/login", async (req: any, res: any) => {
 
   try {
     const result = await pool.query(
-      "SELECT user_id, password_hash, role, name FROM users WHERE email=$1",
+      `SELECT u.user_id, u.password_hash, u.role, u.name, d.is_verified 
+       FROM users u 
+       LEFT JOIN drivers d ON u.user_id = d.user_id 
+       WHERE u.email=$1`,
       [email]
     );
 
@@ -70,6 +73,8 @@ router.post("/login", async (req: any, res: any) => {
 
     const user = result.rows[0];
     const valid = await bcrypt.compare(password, user.password_hash);
+    const role = user.role;
+    const isVerified = user.is_verified;
 
     if (!valid) {
       return res.status(400).json({ message: "Invalid credentials" });
@@ -79,9 +84,13 @@ router.post("/login", async (req: any, res: any) => {
       throw new Error("JWT_SECRET missing in .env");
     }
 
+    if(role === "driver" && !isVerified){
+      return res.status(400).json({ message: "Driver not verified" });
+    }
+
     const token = jwt.sign(
       { id: user.user_id, role: user.role }, 
-      process.env.JWT_SECRET, 
+      process.env.JWT_SECRET as string, 
       { expiresIn: "1h" }
     );
 
@@ -112,17 +121,6 @@ router.get("/vehicle-types", async (req: any, res: any) => {
 
 
 
-const authenticateToken = (req: any, res: any, next: any) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
 
-  if (!token) return res.status(401).json({ message: "Access denied. No token provided." });
 
-  jwt.verify(token, process.env.JWT_SECRET, (err: any, user: any) => {
-    if (err) return res.status(403).json({ message: "Invalid or expired token." });
-    req.user = user;
-    next();
-  });
-};
-
-module.exports = router;
+export default router;

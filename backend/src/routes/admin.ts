@@ -1,9 +1,8 @@
-export {};
-const express = require("express");
-const pool = require("../db.ts");
-const { authenticateAdmin } = require("../middleware/authMiddleware");
-const router = express.Router();
+import express, { Request, Response } from "express";
+import pool from "../db";
+import { authenticateAdmin } from "../middleware/authMiddleware";
 
+const router = express.Router();
 
 router.get("/pending-drivers", authenticateAdmin, async (req: any, res: any) => {
   try {
@@ -97,4 +96,4 @@ router.get("/system-logs", authenticateAdmin, async (req: any, res: any) => {
   }
 });
 
-module.exports = router;
+export default router;

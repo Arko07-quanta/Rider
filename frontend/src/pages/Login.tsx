@@ -14,12 +14,12 @@ function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setForm({
-        ...form,
-        [e.target.name]: e.target.value,
-        });
-    };
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setForm({
+      ...form,
+      [e.target.name]: e.target.value,
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -28,10 +28,14 @@ function Login() {
 
     try {
       const response = await api.post("/api/auth/login", form);
+      const role = response.data.user.role;
 
       localStorage.setItem("token", response.data.token);
 
-      navigate("/dashboard");
+      if (role === "admin") navigate("/dashboard");
+      else if (role === "rider") navigate("/rider");
+      else if (role === "driver") navigate("/driver");
+
     } catch (err: any) {
       if (err.response?.data?.message) {
         setError(err.response.data.message);

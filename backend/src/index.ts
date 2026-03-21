@@ -1,11 +1,10 @@
-export {};
-const express = require("express");
-const cors = require("cors");
-const authRoutes = require("./routes/auth");
-const adminRoutes = require("./routes/admin");
-require("dotenv").config();
-const pool = require("./db.ts");
-const bcrypt = require("bcrypt");
+import "dotenv/config";
+import express, { Request, Response } from "express";
+import cors from "cors";
+import authRoutes from "./routes/auth";
+import adminRoutes from "./routes/admin";
+import pool from "./db";
+import bcrypt from "bcrypt";
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -16,7 +15,7 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 
-app.get("/", (_req: any, res: any) => res.send("Hello World 💖"));
+app.get("/", (_req: Request, res: Response) => res.send("Hello World 💖"));
 
 const initializeDatabase = async () => {
   try {

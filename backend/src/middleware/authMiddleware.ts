@@ -1,18 +1,15 @@
-export {};
-const jwt = require("jsonwebtoken");
-const pool = require("../db.ts");
+import { Request, Response, NextFunction } from "express";
+import jwt from "jsonwebtoken";
+import pool from "../db";
 
-const authenticateAdmin = async (req: any, res: any, next: any) => {
+export const authenticateAdmin = async (req: any, res: any, next: any) => {
   const token = req.headers.authorization?.split(" ")[1];
-
 
   if (!token) return res.status(401).json({ message: "No token provided" });
 
-
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as any;
     req.user = decoded;
-
 
     const userRes = await pool.query("SELECT role FROM users WHERE user_id = $1", [req.user.id]);
     
@@ -26,4 +23,15 @@ const authenticateAdmin = async (req: any, res: any, next: any) => {
   }
 };
 
-module.exports = { authenticateAdmin };
+export const authenticateToken = (req: any, res: any, next: any) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) return res.status(401).json({ message: "Access denied. No token provided." });
+
+  jwt.verify(token, process.env.JWT_SECRET as string, (err: any, user: any) => {
+    if (err) return res.status(403).json({ message: "Invalid or expired token." });
+    req.user = user;
+    next();
+  });
+};
