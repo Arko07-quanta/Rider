@@ -1,8 +1,254 @@
 .driver-container {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
   height: 100vh;
+  flex-direction: row;
+  overflow: hidden;
+}
+
+.driver-sidebar {
+  width: 380px;
+  padding: 24px;
+  background-color: #fff;
+  box-shadow: 2px 0 10px rgba(0,0,0,0.06);
+  z-index: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.driver-title {
+  margin-bottom: 20px;
+}
+
+.tab-header {
+  display: flex;
+  border-bottom: 1px solid #eee;
+  margin-bottom: 20px;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 12px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font-weight: 600;
+  color: #888;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  color: #1890ff;
+}
+
+.tab-btn.active {
+  color: #1890ff;
+  border-bottom-color: #1890ff;
+}
+
+.tab-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.active-ride-card {
+  padding: 24px;
+  background-color: #f6ffed;
+  border: 1px solid #b7eb8f;
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+
+.active-ride-header {
+  margin: 0 0 16px 0;
+  color: #389e0d;
+}
+
+.active-ride-details {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+.active-ride-row {
+  display: flex;
+  justify-content: space-between;
+}
+
+.active-ride-label {
+  color: #64748b;
+}
+
+.active-ride-value {
+  font-weight: 700;
+}
+
+.active-ride-separator {
+  margin: 8px 0;
+  border: none;
+  border-top: 1px solid #e2e8f0;
+}
+
+.active-ride-address-label {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.active-ride-address-value {
+  margin: 4px 0 0 0;
+  font-weight: 600;
+}
+
+.complete-btn {
+  width: 100%;
+  padding: 14px;
+  background-color: #52c41a;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 15px;
+  transition: background-color 0.2s;
+}
+
+.complete-btn:hover {
+  background-color: #389e0d;
+}
+
+.searching-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #52c41a;
+  animation: pulse 1.5s infinite;
+}
+
+.searching-text {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.preview-card {
+  padding: 16px;
+  background-color: #e6f7ff;
+  border: 1px solid #91d5ff;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.1);
+}
+
+.preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.preview-title {
+  margin: 0;
+  color: #0050b3;
+  font-size: 14px;
+}
+
+.close-preview {
+  background: none;
+  border: none;
+  color: #91d5ff;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px;
+}
+
+.close-preview:hover {
+  color: #0050b3;
+}
+
+.full-width {
+  width: 100%;
+}
+
+.request-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.no-requests {
   text-align: center;
+  padding: 40px 20px;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.no-requests-icon {
+  font-size: 32px;
+  margin-bottom: 12px;
+}
+
+.accept-btn {
+  padding: 12px;
+  background-color: #1890ff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background-color 0.2s;
+}
+
+.accept-btn:disabled {
+  background-color: #bfbfbf;
+  cursor: not-allowed;
+}
+
+.accept-btn:not(:disabled):hover {
+  background-color: #096dd9;
+}
+
+.map-viewport {
+  flex: 1;
+  height: 100vh;
+  overflow: hidden;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.2); }
+}
+.active-ride-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cancel-ride-btn {
+  width: 100%;
+  padding: 12px;
+  background-color: transparent;
+  border: 1px solid #ff4d4f;
+  color: #ff4d4f;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.cancel-ride-btn:hover {
+  background-color: #fff1f0;
+  border-color: #f5222d;
+  color: #f5222d;
 }

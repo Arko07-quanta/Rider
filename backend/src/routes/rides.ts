@@ -72,43 +72,75 @@ router.post("/request", authenticateToken, async (req: any, res: any) => {
   }
 });
 
+// ── RIDER: Get all their ride requests (history and current) ─────────────
+router.get("/my-requests", authenticateToken, async (req: any, res: any) => {
+  const user_id = req.user.id;
+  try {
+    const result = await pool.query(
+      `SELECT 
+          rq.request_id, 
+          rq.status AS request_status, 
+          rq.created_at,
+          lp.address AS pickup_address, 
+          ld.address AS dropoff_address,
+          lp.latitude AS pickup_lat, lp.longitude AS pickup_lng,
+          ld.latitude AS dropoff_lat, ld.longitude AS dropoff_lng,
+          r.status AS ride_status,
+          r.ride_id,
+          r.distance,
+          r.fare,
+          u_driver.name AS driver_name,
+          u_driver.phone AS driver_phone
+       FROM ride_requests rq
+       LEFT JOIN rides r ON r.request_id = rq.request_id
+       LEFT JOIN locations lp ON lp.location_id = r.pickup_location_id
+       LEFT JOIN locations ld ON ld.location_id = r.dropoff_location_id
+       LEFT JOIN users u_driver ON u_driver.user_id = r.driver_id
+       WHERE rq.rider_id = $1
+       ORDER BY rq.created_at DESC
+       LIMIT 50`,
+      [user_id]
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error("Error fetching requests:", err);
+    res.status(500).json({ message: "Failed to fetch ride requests" });
+  }
+});
+
 // ── RIDER: Poll for their current active request/ride ────────────────────
 router.get("/my-request", authenticateToken, async (req: any, res: any) => {
   const rider_id = req.user.id;
 
   try {
-    // Check if there's an accepted ride with a driver assigned
-    const rideResult = await pool.query(
-      `SELECT r.ride_id, r.status, u.name AS driver_name, u.phone AS driver_phone,
-              lp.address AS pickup_address, ld.address AS dropoff_address
+    const result = await pool.query(
+      `SELECT rq.request_id, rq.status AS request_status, r.status AS ride_status, 
+              u.name AS driver_name, u.phone AS driver_phone,
+              lp.address AS pickup_address, ld.address AS dropoff_address,
+              lp.latitude AS pickup_lat, lp.longitude AS pickup_lng,
+              ld.latitude AS dropoff_lat, ld.longitude AS dropoff_lng
        FROM ride_requests rq
-       JOIN rides r ON r.request_id = rq.request_id
-       JOIN locations lp ON lp.location_id = r.pickup_location_id
-       JOIN locations ld ON ld.location_id = r.dropoff_location_id
+       LEFT JOIN rides r ON r.request_id = rq.request_id
+       LEFT JOIN locations lp ON lp.location_id = r.pickup_location_id
+       LEFT JOIN locations ld ON ld.location_id = r.dropoff_location_id
        LEFT JOIN users u ON u.user_id = r.driver_id
-       WHERE rq.rider_id = $1 AND rq.status = 'accepted'
-       ORDER BY r.ride_id DESC LIMIT 1`,
-      [rider_id]
-    );
-
-    if (rideResult.rows.length > 0) {
-      return res.json({ phase: "matched", ride: rideResult.rows[0] });
-    }
-
-    // Check for a pending request
-    const reqResult = await pool.query(
-      `SELECT rq.request_id, rq.status, lp.address AS pickup_address, ld.address AS dropoff_address
-       FROM ride_requests rq
-       JOIN rides r ON r.request_id = rq.request_id
-       JOIN locations lp ON lp.location_id = r.pickup_location_id
-       JOIN locations ld ON ld.location_id = r.dropoff_location_id
-       WHERE rq.rider_id = $1 AND rq.status = 'pending'
+       WHERE rq.rider_id = $1
        ORDER BY rq.created_at DESC LIMIT 1`,
       [rider_id]
     );
 
-    if (reqResult.rows.length > 0) {
-      return res.json({ phase: "pending", request: reqResult.rows[0] });
+    if (result.rows.length === 0) {
+      return res.json({ phase: "idle" });
+    }
+
+    const row = result.rows[0];
+    
+    if (row.request_status === 'accepted' && row.ride_status === 'ongoing') {
+      return res.json({ phase: "matched", ride: row });
+    }
+    
+    if (row.request_status === 'pending') {
+      return res.json({ phase: "pending", request: row });
     }
 
     res.json({ phase: "idle" });
@@ -151,6 +183,8 @@ router.get("/pending", authenticateToken, async (req: any, res: any) => {
     const result = await pool.query(
       `SELECT rq.request_id, u.name AS rider_name,
               lp.address AS pickup_address, ld.address AS dropoff_address,
+              lp.latitude AS pickup_lat, lp.longitude AS pickup_lng,
+              ld.latitude AS dropoff_lat, ld.longitude AS dropoff_lng,
               rq.created_at
        FROM ride_requests rq
        JOIN users u ON u.user_id = rq.rider_id
@@ -165,6 +199,37 @@ router.get("/pending", authenticateToken, async (req: any, res: any) => {
   } catch (err: any) {
     console.error("Pending requests error:", err);
     res.status(500).json({ message: err.message });
+  }
+});
+
+// ── DRIVER: Get their own ride history ───────────────────────────────────
+router.get("/activity", authenticateToken, async (req: any, res: any) => {
+  const user_id = req.user.id;
+  try {
+    const result = await pool.query(
+      `SELECT 
+          r.ride_id, 
+          rq.request_id,
+          rq.status AS request_status, 
+          r.status AS ride_status,
+          r.created_at,
+          lp.address AS pickup_address, 
+          ld.address AS dropoff_address,
+          u_rider.name AS rider_name
+       FROM rides r
+       JOIN ride_requests rq ON rq.request_id = r.request_id
+       JOIN locations lp ON lp.location_id = r.pickup_location_id
+       JOIN locations ld ON ld.location_id = r.dropoff_location_id
+       JOIN users u_rider ON u_rider.user_id = rq.rider_id
+       WHERE r.driver_id = $1
+       ORDER BY r.created_at DESC
+       LIMIT 50`,
+      [user_id]
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error("Driver activity error:", err);
+    res.status(500).json({ message: "Failed to fetch driver activity" });
   }
 });
 
@@ -220,7 +285,9 @@ router.get("/my-ride", authenticateToken, async (req: any, res: any) => {
     const result = await pool.query(
       `SELECT r.ride_id, r.status,
               u.name AS rider_name, u.phone AS rider_phone,
-              lp.address AS pickup_address, ld.address AS dropoff_address
+              lp.address AS pickup_address, ld.address AS dropoff_address,
+              lp.latitude AS pickup_lat, lp.longitude AS pickup_lng,
+              ld.latitude AS dropoff_lat, ld.longitude AS dropoff_lng
        FROM rides r
        JOIN ride_requests rq ON rq.request_id = r.request_id
        JOIN users u ON u.user_id = rq.rider_id
@@ -258,4 +325,52 @@ router.post("/complete/:rideId", authenticateToken, async (req: any, res: any) =
   }
 });
 
+// ── DRIVER: Cancel an ongoing ride ───────────────────────────────────────
+router.post("/driver-cancel/:rideId", authenticateToken, async (req: any, res: any) => {
+  const { rideId } = req.params;
+  const driver_id = req.user.id;
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    // 1. Update ride status to 'cancelled'
+    const rideResult = await client.query(
+      `UPDATE rides SET status = 'cancelled', updated_at = NOW()
+       WHERE ride_id = $1 AND driver_id = $2 AND status = 'ongoing'
+       RETURNING request_id`,
+      [rideId, driver_id]
+    );
+
+    if (rideResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Ongoing ride not found" });
+    }
+
+    const requestId = rideResult.rows[0].request_id;
+
+    // 2. Update the original request status to 'cancelled'
+    await client.query(
+      "UPDATE ride_requests SET status = 'cancelled' WHERE request_id = $1",
+      [requestId]
+    );
+
+    // 3. Log into ride_cancellations
+    await client.query(
+      "INSERT INTO ride_cancellations (ride_id, cancelled_by, reason) VALUES ($1, 'driver', 'Driver initiated cancellation')",
+      [rideId]
+    );
+
+    await client.query("COMMIT");
+    res.json({ message: "Ride cancelled by driver" });
+  } catch (err: any) {
+    await client.query("ROLLBACK");
+    console.error("Driver cancel error:", err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 export default router;
+

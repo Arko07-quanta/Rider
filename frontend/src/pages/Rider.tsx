@@ -3,26 +3,21 @@ import './Rider.css';
 import LocationSearch from '../components/map/LocationSearch';
 import type { LocationData } from '../components/map/LocationSearch';
 import RouteMap from '../components/map/RouteMap';
+import RideItem, { type RideData } from '../components/rides/RideItem';
 import api from '../api/axios';
 
 type Phase = 'idle' | 'pending' | 'matched';
 
-interface ActiveRide {
-  ride_id: number;
-  driver_name: string;
-  driver_phone: string;
-  pickup_address: string;
-  dropoff_address: string;
-}
-
 export default function Rider() {
+  const [activeTab, setActiveTab] = useState<'book' | 'history'>('book');
   const [pickup, setPickup] = useState<LocationData | null>(null);
   const [dropoff, setDropoff] = useState<LocationData | null>(null);
   const [distance, setDistance] = useState('');
   const [duration, setDuration] = useState('');
   const [phase, setPhase] = useState<Phase>('idle');
-  const [activeRide, setActiveRide] = useState<ActiveRide | null>(null);
+  const [requests, setRequests] = useState<RideData[]>([]);
   const [statusMsg, setStatusMsg] = useState('');
+  const [selectedHistoryRide, setSelectedHistoryRide] = useState<RideData | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = useCallback(() => {
@@ -32,33 +27,52 @@ export default function Rider() {
     }
   }, []);
 
-  const startPolling = useCallback(() => {
-    stopPolling();
-    pollRef.current = setInterval(async () => {
-      try {
-        const { data } = await api.get('/api/rides/my-request');
-        if (data.phase === 'matched') {
-          setPhase('matched');
-          setActiveRide(data.ride);
-          stopPolling();
-        } else if (data.phase === 'idle') {
-          // Request was cancelled externally
-          setPhase('idle');
-          stopPolling();
-        }
-      } catch (err) {
-        console.error('Polling error:', err);
-      }
-    }, 3000);
-  }, [stopPolling]);
-
-  // Cleanup on unmount
-  useEffect(() => () => stopPolling(), [stopPolling]);
-
-  const handleRouteCalculated = useCallback((distText: string, durText: string) => {
-    setDistance(distText);
-    setDuration(durText);
+  const fetchHistory = useCallback(async () => {
+    try {
+      const { data } = await api.get('/api/rides/my-requests');
+      setRequests(data);
+    } catch (err) {
+      console.error('Failed to fetch history:', err);
+    }
   }, []);
+
+  const checkState = useCallback(async () => {
+    try {
+      const { data } = await api.get('/api/rides/my-request');
+      if (data.phase === 'matched') {
+        setPhase('matched');
+      } else if (data.phase === 'pending') {
+        setPhase('pending');
+      } else {
+        setPhase('idle');
+      }
+      fetchHistory();
+    } catch (err) {
+      console.error('CheckState error:', err);
+    }
+  }, [fetchHistory]);
+
+  // Polling logic: if any request is active, keep polling
+  useEffect(() => {
+    const hasActive = requests.some(r => r.request_status === 'pending' || (r.request_status === 'accepted' && r.ride_status === 'ongoing'));
+    if (hasActive || phase !== 'idle') {
+      if (!pollRef.current) {
+        pollRef.current = setInterval(checkState, 3000);
+      }
+    } else {
+      stopPolling();
+    }
+    return () => stopPolling();
+  }, [requests, phase, checkState, stopPolling]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
+
+  const handleRouteCalculated = (dist: string, dur: string) => {
+    setDistance(dist);
+    setDuration(dur);
+  };
 
   const handleRequestRide = async () => {
     if (!pickup || !dropoff) return;
@@ -72,8 +86,14 @@ export default function Rider() {
         dropoff_lat: dropoff.lat,
         dropoff_lng: dropoff.lng,
       });
-      setPhase('pending');
-      startPolling();
+      // Reset for next request
+      setPhase('idle');
+      setPickup(null);
+      setDropoff(null);
+      setDistance('');
+      setDuration('');
+      fetchHistory();
+      setActiveTab('history');
     } catch (err: any) {
       setStatusMsg(err.response?.data?.message || 'Failed to request ride');
     }
@@ -82,95 +102,145 @@ export default function Rider() {
   const handleCancel = async () => {
     try {
       await api.delete('/api/rides/cancel');
+      setPhase('idle');
+      fetchHistory();
     } catch (_) {}
-    stopPolling();
-    setPhase('idle');
   };
 
+  const running = requests.filter(r => r.request_status === 'pending' || (r.request_status === 'accepted' && r.ride_status === 'ongoing'));
+  const completed = requests.filter(r => r.request_status === 'cancelled' || r.ride_status === 'completed' || r.ride_status === 'cancelled' || r.request_status === 'rejected');
+
+  // Map logic: switch coordinates based on tab and selection
+  const mapOrigin = activeTab === 'book' 
+    ? (pickup ? { lat: pickup.lat, lng: pickup.lng } : null)
+    : (selectedHistoryRide ? { lat: Number(selectedHistoryRide.pickup_lat), lng: Number(selectedHistoryRide.pickup_lng) } : null);
+
+  const mapDestination = activeTab === 'book'
+    ? (dropoff ? { lat: dropoff.lat, lng: dropoff.lng } : null)
+    : (selectedHistoryRide ? { lat: Number(selectedHistoryRide.dropoff_lat), lng: Number(selectedHistoryRide.dropoff_lng) } : null);
+
   return (
-    <div className="rider-container" style={{ display: 'flex', height: '100vh', flexDirection: 'row', overflow: 'hidden' }}>
+    <div className="rider-container">
 
       {/* ── Sidebar ─────────────────────────────────────────── */}
-      <div style={{ width: '380px', padding: '24px', backgroundColor: '#fff', boxShadow: '2px 0 10px rgba(0,0,0,0.06)', zIndex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0px' }}>
-        <h2 style={{ marginBottom: '20px' }}>Where to?</h2>
+      <div className="rider-sidebar">
+        
+        <div className="tab-header">
+          <button 
+            className={`tab-btn ${activeTab === 'book' ? 'active' : ''}`}
+            onClick={() => setActiveTab('book')}
+          >
+            Book a Ride
+          </button>
+          <button 
+            className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('history'); fetchHistory(); }}
+          >
+            My Activity
+          </button>
+        </div>
 
-        {phase === 'idle' && (
-          <>
-            <div style={{ marginBottom: '16px' }}>
-              <h4 style={{ marginBottom: '8px', color: '#555' }}>Pickup</h4>
+        {activeTab === 'book' ? (
+          <div className="tab-content">
+            <h2 className="rider-title">Where to?</h2>
+
+            <div className="search-group">
+              <h4 className="search-label">Pickup</h4>
               <LocationSearch placeholder="Enter pickup location" onSelect={setPickup} />
             </div>
 
-            <div style={{ marginBottom: '16px' }}>
-              <h4 style={{ marginBottom: '8px', color: '#555' }}>Drop-off</h4>
+            <div className="search-group">
+              <h4 className="search-label">Drop-off</h4>
               <LocationSearch placeholder="Enter destination" onSelect={setDropoff} />
             </div>
 
             {distance && duration && (
-              <div style={{ padding: '20px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e9ecef' }}>
-                <h4 style={{ margin: '0 0 15px 0', borderBottom: '1px solid #ddd', paddingBottom: '10px' }}>Trip Estimate</h4>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                  <span style={{ color: '#666' }}>Distance:</span>
-                  <strong>{distance}</strong>
+              <div className="estimate-card">
+                <h4 className="estimate-title">Trip Estimate</h4>
+                <div className="estimate-row">
+                  <span className="estimate-label">Distance:</span>
+                  <strong className="estimate-value">{distance}</strong>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
-                  <span style={{ color: '#666' }}>Duration:</span>
-                  <strong>{duration}</strong>
+                <div className="estimate-row" style={{ marginBottom: '20px' }}>
+                  <span className="estimate-label">Duration:</span>
+                  <strong className="estimate-value">{duration}</strong>
                 </div>
-                {statusMsg && <p style={{ color: 'red', marginBottom: '8px', fontSize: '14px' }}>{statusMsg}</p>}
+                {statusMsg && <p className="error-msg">{statusMsg}</p>}
                 <button
                   onClick={handleRequestRide}
-                  style={{ width: '100%', padding: '14px', backgroundColor: '#000', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }}
+                  className="confirm-btn"
                 >
                   Confirm Ride
                 </button>
               </div>
             )}
-          </>
-        )}
 
-        {phase === 'pending' && (
-          <div style={{ padding: '24px', backgroundColor: '#fffbe6', border: '1px solid #ffe58f', borderRadius: '8px', textAlign: 'center' }}>
-            <div style={{ fontSize: '36px', marginBottom: '12px' }}>🔍</div>
-            <h3 style={{ margin: '0 0 8px 0' }}>Looking for a driver...</h3>
-            <p style={{ color: '#666', marginBottom: '20px', fontSize: '14px' }}>
-              From: <strong>{pickup?.address.split(',')[0]}</strong><br />
-              To: <strong>{dropoff?.address.split(',')[0]}</strong>
-            </p>
-            <div style={{ marginBottom: '20px' }}>
-              <div style={{ width: '40px', height: '40px', border: '4px solid #e0e0e0', borderTopColor: '#1890ff', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto' }} />
-            </div>
-            <button
-              onClick={handleCancel}
-              style={{ padding: '10px 24px', backgroundColor: '#fff', border: '1px solid #ff4d4f', color: '#ff4d4f', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}
-            >
-              Cancel Request
-            </button>
-            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            {/* If the current interaction is pending, show a small status chip */}
+            {running.length > 0 && (
+              <div className="active-count-badge">
+                You have {running.length} active request{running.length > 1 ? 's' : ''}. 
+                <button onClick={() => setActiveTab('history')}>View All</button>
+              </div>
+            )}
           </div>
-        )}
+        ) : (
+          <div className="tab-content">
+            
+            {selectedHistoryRide && (
+              <div className="preview-card history-preview">
+                <div className="preview-header">
+                  <h4 className="preview-title">
+                    {selectedHistoryRide.ride_status === 'completed' ? '🏁 Past Trip Path' : '⏳ Action Required'}
+                  </h4>
+                  <button className="close-preview" onClick={() => setSelectedHistoryRide(null)}>✕</button>
+                </div>
+                <div className="preview-body">
+                  <div className="preview-meta">
+                    {selectedHistoryRide.distance && <span>{selectedHistoryRide.distance} km trip</span>}
+                    {selectedHistoryRide.driver_name && <span>Driver: {selectedHistoryRide.driver_name}</span>}
+                  </div>
+                  {selectedHistoryRide.request_status === 'pending' && (
+                    <button className="inline-cancel-btn" onClick={handleCancel}>Cancel This Request</button>
+                  )}
+                </div>
+              </div>
+            )}
 
-        {phase === 'matched' && activeRide && (
-          <div style={{ padding: '24px', backgroundColor: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: '8px' }}>
-            <div style={{ fontSize: '36px', marginBottom: '12px', textAlign: 'center' }}>🚗</div>
-            <h3 style={{ margin: '0 0 16px 0', textAlign: 'center', color: '#389e0d' }}>Driver En Route!</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '14px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#666' }}>Driver:</span>
-                <strong>{activeRide.driver_name}</strong>
+            <div className="history-sections">
+              <div className="history-section">
+                <h3 className="section-title">Running</h3>
+                <div className="request-list">
+                  {running.length === 0 ? (
+                    <div className="no-activity">No active requests.</div>
+                  ) : (
+                    running.map(req => (
+                      <RideItem 
+                        key={req.request_id} 
+                        ride={req} 
+                        onClick={() => setSelectedHistoryRide(req)} 
+                        active={selectedHistoryRide?.request_id === req.request_id}
+                      />
+                    ))
+                  )}
+                </div>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#666' }}>Phone:</span>
-                <strong>{activeRide.driver_phone}</strong>
-              </div>
-              <hr style={{ margin: '8px 0', border: 'none', borderTop: '1px solid #eee' }} />
-              <div>
-                <span style={{ color: '#666' }}>Pickup:</span>
-                <p style={{ margin: '4px 0 0 0', fontWeight: 'bold' }}>{activeRide.pickup_address.split(',')[0]}</p>
-              </div>
-              <div>
-                <span style={{ color: '#666' }}>Drop-off:</span>
-                <p style={{ margin: '4px 0 0 0', fontWeight: 'bold' }}>{activeRide.dropoff_address.split(',')[0]}</p>
+
+              <div className="history-section" style={{ marginTop: '24px' }}>
+                <h3 className="section-title">Completed</h3>
+                <div className="request-list">
+                  {completed.length === 0 ? (
+                    <div className="no-activity">No past trips.</div>
+                  ) : (
+                    completed.map(req => (
+                      <RideItem 
+                        key={req.request_id} 
+                        ride={req} 
+                        onClick={() => setSelectedHistoryRide(req)}
+                        active={selectedHistoryRide?.request_id === req.request_id}
+                      />
+                    ))
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -178,10 +248,10 @@ export default function Rider() {
       </div>
 
       {/* ── Map ─────────────────────────────────────────────── */}
-      <div style={{ flex: 1, height: '100vh', overflow: 'hidden' }}>
+      <div className="map-viewport">
         <RouteMap
-          origin={pickup ? { lat: pickup.lat, lng: pickup.lng } : null}
-          destination={dropoff ? { lat: dropoff.lat, lng: dropoff.lng } : null}
+          origin={mapOrigin}
+          destination={mapDestination}
           onRouteCalculated={handleRouteCalculated}
         />
       </div>
@@ -189,3 +259,4 @@ export default function Rider() {
     </div>
   );
 }
+

@@ -59,7 +59,6 @@ export default function VerificationPanel({ drivers, loading, onVerify, onDeclin
                   </button>
                   <button
                     className="btn-decline"
-                    style={{ marginLeft: "8px", backgroundColor: "#ff4d4f", color: "white", border: "none", padding: "6px 12px", borderRadius: "4px", cursor: "pointer" }}
                     onClick={() => onDecline(driver.user_id)}
                   >
                     Decline

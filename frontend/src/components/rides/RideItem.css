@@ -1,0 +1,92 @@
+.ride-item-card {
+  padding: 16px;
+  background-color: #fff;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ride-item-card:hover {
+  border-color: #1890ff;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  transform: translateY(-2px);
+}
+
+.ride-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.status-badge {
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  background-color: #f0f0f0;
+  color: #888;
+}
+
+.status-badge.pending { background-color: #fffbe6; color: #d4b106; }
+.status-badge.ongoing { background-color: #e6f7ff; color: #1890ff; }
+.status-badge.completed { background-color: #f6ffed; color: #52c41a; }
+.status-badge.cancelled { background-color: #fff1f0; color: #f5222d; }
+
+.ride-date {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.ride-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.address-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot.pickup { background-color: #1890ff; }
+.dot.dropoff { background-color: #ff4d4f; }
+
+.address-text {
+  font-size: 14px;
+  color: #334155;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ride-footer {
+  border-top: 1px solid #f1f5f9;
+  padding-top: 10px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.person-info {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ride-item-card.active {
+  border-color: #1890ff;
+  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.15);
+  background-color: #f0f7ff;
+}

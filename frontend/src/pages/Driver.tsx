@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import './Driver.css';
 import RouteMap from '../components/map/RouteMap';
+import RideItem, { type RideData } from '../components/rides/RideItem';
 import api from '../api/axios';
 
 type Phase = 'searching' | 'active';
@@ -10,6 +11,11 @@ interface PendingRequest {
   rider_name: string;
   pickup_address: string;
   dropoff_address: string;
+  pickup_lat: number;
+  pickup_lng: number;
+  dropoff_lat: number;
+  dropoff_lng: number;
+  created_at: string;
 }
 
 interface ActiveRide {
@@ -18,12 +24,19 @@ interface ActiveRide {
   rider_phone: string;
   pickup_address: string;
   dropoff_address: string;
+  pickup_lat: number;
+  pickup_lng: number;
+  dropoff_lat: number;
+  dropoff_lng: number;
 }
 
 export default function Driver() {
+  const [activeTab, setActiveTab] = useState<'find' | 'history'>('find');
   const [phase, setPhase] = useState<Phase>('searching');
   const [requests, setRequests] = useState<PendingRequest[]>([]);
   const [activeRide, setActiveRide] = useState<ActiveRide | null>(null);
+  const [history, setHistory] = useState<RideData[]>([]);
+  const [selectedPreview, setSelectedPreview] = useState<PendingRequest | null>(null);
   const [accepting, setAccepting] = useState<number | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -31,6 +44,15 @@ export default function Driver() {
     if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
+    }
+  }, []);
+
+  const fetchHistory = useCallback(async () => {
+    try {
+      const { data } = await api.get('/api/rides/activity');
+      setHistory(data);
+    } catch (err) {
+      console.error('Failed to fetch history:', err);
     }
   }, []);
 
@@ -49,6 +71,7 @@ export default function Driver() {
       if (data) {
         setActiveRide(data);
         setPhase('active');
+        setSelectedPreview(null);
         stopPolling();
       }
     } catch (err) {
@@ -62,20 +85,22 @@ export default function Driver() {
       pollRef.current = setInterval(pollPendingRequests, 4000);
       pollPendingRequests();
     });
+    fetchHistory();
     return () => stopPolling();
-  }, [pollActiveRide, pollPendingRequests, stopPolling]);
+  }, [pollActiveRide, pollPendingRequests, stopPolling, fetchHistory]);
 
   const handleAccept = async (requestId: number) => {
     setAccepting(requestId);
     try {
       await api.post(`/api/rides/accept/${requestId}`);
-      // Switch to active polling for the new ride
       stopPolling();
       const { data } = await api.get<ActiveRide | null>('/api/rides/my-ride');
       if (data) {
         setActiveRide(data);
         setPhase('active');
+        setSelectedPreview(null);
       }
+      fetchHistory();
     } catch (err: any) {
       alert(err.response?.data?.message || 'Failed to accept ride');
     } finally {
@@ -90,6 +115,7 @@ export default function Driver() {
       setActiveRide(null);
       setPhase('searching');
       setRequests([]);
+      fetchHistory();
       // Restart polling
       pollRef.current = setInterval(pollPendingRequests, 4000);
       pollPendingRequests();
@@ -98,95 +124,174 @@ export default function Driver() {
     }
   };
 
+  const handleCancelRide = async () => {
+    if (!activeRide || !window.confirm('Are you sure you want to cancel this ride?')) return;
+    try {
+      await api.post(`/api/rides/driver-cancel/${activeRide.ride_id}`);
+      setActiveRide(null);
+      setPhase('searching');
+      setRequests([]);
+      fetchHistory();
+      // Restart polling
+      pollRef.current = setInterval(pollPendingRequests, 4000);
+      pollPendingRequests();
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Failed to cancel ride');
+    }
+  };
+
+  const mapOrigin = activeRide 
+    ? { lat: Number(activeRide.pickup_lat), lng: Number(activeRide.pickup_lng) } 
+    : selectedPreview 
+      ? { lat: Number(selectedPreview.pickup_lat), lng: Number(selectedPreview.pickup_lng) } 
+      : null;
+
+  const mapDestination = activeRide 
+    ? { lat: Number(activeRide.dropoff_lat), lng: Number(activeRide.dropoff_lng) } 
+    : selectedPreview 
+      ? { lat: Number(selectedPreview.dropoff_lat), lng: Number(selectedPreview.dropoff_lng) } 
+      : null;
+
   return (
-    <div className="driver-container" style={{ display: 'flex', height: '100vh', flexDirection: 'row', overflow: 'hidden' }}>
+    <div className="driver-container">
 
       {/* ── Sidebar ─────────────────────────────────────────── */}
-      <div style={{ width: '380px', padding: '24px', backgroundColor: '#fff', boxShadow: '2px 0 10px rgba(0,0,0,0.06)', zIndex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        <h2 style={{ marginBottom: '4px' }}>Driver Dashboard</h2>
+      <div className="driver-sidebar">
+        
+        <div className="tab-header">
+          <button 
+            className={`tab-btn ${activeTab === 'find' ? 'active' : ''}`}
+            onClick={() => setActiveTab('find')}
+          >
+            Find Rides
+          </button>
+          <button 
+            className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('history'); fetchHistory(); }}
+          >
+            My Activity
+          </button>
+        </div>
 
-        {/* Active ride card */}
-        {phase === 'active' && activeRide && (
-          <div style={{ padding: '20px', backgroundColor: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: '8px' }}>
-            <h4 style={{ margin: '0 0 14px 0', color: '#389e0d' }}>🚗 Active Ride</h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '14px', marginBottom: '16px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#666' }}>Rider:</span>
-                <strong>{activeRide.rider_name}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#666' }}>Phone:</span>
-                <strong>{activeRide.rider_phone}</strong>
-              </div>
-              <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #eee' }} />
-              <div>
-                <span style={{ color: '#666' }}>Pickup:</span>
-                <p style={{ margin: '4px 0 0 0', fontWeight: 'bold' }}>{activeRide.pickup_address.split(',')[0]}</p>
-              </div>
-              <div>
-                <span style={{ color: '#666' }}>Drop-off:</span>
-                <p style={{ margin: '4px 0 0 0', fontWeight: 'bold' }}>{activeRide.dropoff_address.split(',')[0]}</p>
-              </div>
-            </div>
-            <button
-              onClick={handleComplete}
-              style={{ width: '100%', padding: '12px', backgroundColor: '#52c41a', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px' }}
-            >
-              ✅ Complete Ride
-            </button>
-          </div>
-        )}
-
-        {/* Pending requests list */}
-        {phase === 'searching' && (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#52c41a', animation: 'pulse 1.5s infinite' }} />
-              <span style={{ color: '#555', fontSize: '14px' }}>Looking for ride requests...</span>
-            </div>
-
-            {requests.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '30px 0', color: '#aaa' }}>
-                <div style={{ fontSize: '32px', marginBottom: '8px' }}>🔍</div>
-                No requests nearby
-              </div>
-            ) : (
-              requests.map(req => (
-                <div key={req.request_id} style={{ padding: '16px', backgroundColor: '#e6f7ff', border: '1px solid #91d5ff', borderRadius: '8px' }}>
-                  <h4 style={{ margin: '0 0 10px 0', color: '#0050b3' }}>🧍 {req.rider_name}</h4>
-                  <p style={{ margin: '0 0 4px 0', fontSize: '13px' }}>
-                    <span style={{ color: '#666' }}>From: </span>
-                    <strong>{req.pickup_address.split(',')[0]}</strong>
-                  </p>
-                  <p style={{ margin: '0 0 14px 0', fontSize: '13px' }}>
-                    <span style={{ color: '#666' }}>To: </span>
-                    <strong>{req.dropoff_address.split(',')[0]}</strong>
-                  </p>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                      onClick={() => handleAccept(req.request_id)}
-                      disabled={accepting === req.request_id}
-                      style={{ flex: 1, padding: '10px', backgroundColor: accepting === req.request_id ? '#aaa' : '#52c41a', color: '#fff', border: 'none', borderRadius: '4px', cursor: accepting === req.request_id ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}
-                    >
-                      {accepting === req.request_id ? 'Accepting...' : 'Accept'}
-                    </button>
+        {activeTab === 'find' ? (
+          <div className="tab-content">
+            {phase === 'active' && activeRide ? (
+              <div className="active-ride-card">
+                <h4 className="active-ride-header">🚗 Active Ride</h4>
+                <div className="active-ride-details">
+                  <div className="active-ride-row">
+                    <span className="active-ride-label">Rider:</span>
+                    <strong className="active-ride-value">{activeRide.rider_name}</strong>
+                  </div>
+                  <div className="active-ride-row">
+                    <span className="active-ride-label">Phone:</span>
+                    <strong className="active-ride-value">{activeRide.rider_phone}</strong>
+                  </div>
+                  <hr className="active-ride-separator" />
+                  <div className="active-ride-address-block">
+                    <span className="active-ride-address-label">Pickup:</span>
+                    <p className="active-ride-address-value">{activeRide.pickup_address.split(',')[0]}</p>
+                  </div>
+                  <div className="active-ride-address-block">
+                    <span className="active-ride-address-label">Drop-off:</span>
+                    <p className="active-ride-address-value">{activeRide.dropoff_address.split(',')[0]}</p>
                   </div>
                 </div>
-              ))
-            )}
-          </>
-        )}
+                <div className="active-ride-actions">
+                  <button
+                    onClick={handleComplete}
+                    className="complete-btn"
+                  >
+                    ✅ Complete Ride
+                  </button>
+                  <button
+                    onClick={handleCancelRide}
+                    className="cancel-ride-btn"
+                  >
+                    ✖ Cancel Ride
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="searching-indicator">
+                  <div className="status-dot" />
+                  <span className="searching-text">Looking for ride requests...</span>
+                </div>
 
-        <style>{`
-          @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-        `}</style>
+                {selectedPreview && (
+                  <div className="preview-card">
+                    <div className="preview-header">
+                      <h4 className="preview-title">Previewing Route</h4>
+                      <button className="close-preview" onClick={() => setSelectedPreview(null)}>✕</button>
+                    </div>
+                    <div className="preview-body">
+                      <p><strong>Rider:</strong> {selectedPreview.rider_name}</p>
+                      <button 
+                        className="accept-btn full-width"
+                        onClick={() => handleAccept(selectedPreview.request_id)}
+                        disabled={accepting === selectedPreview.request_id}
+                      >
+                        {accepting === selectedPreview.request_id ? 'Accepting...' : 'Accept This Ride'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="request-list">
+                  {requests.length === 0 ? (
+                    <div className="no-requests">
+                      <div className="no-requests-icon">🔍</div>
+                      No requests nearby
+                    </div>
+                  ) : (
+                    requests.map(req => (
+                      <RideItem 
+                        key={req.request_id} 
+                        ride={{
+                          request_id: req.request_id,
+                          request_status: 'pending',
+                          ride_status: null,
+                          created_at: req.created_at,
+                          pickup_address: req.pickup_address,
+                          dropoff_address: req.dropoff_address,
+                          rider_name: req.rider_name
+                        }} 
+                        showRider
+                        onClick={() => setSelectedPreview(req)}
+                      />
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="tab-content">
+            <h2 className="driver-title">Past Earnings</h2>
+            <div className="request-list">
+              {history.length === 0 ? (
+                <div className="no-activity">No completed rides yet.</div>
+              ) : (
+                history.map(ride => (
+                  <RideItem 
+                    key={ride.ride_id} 
+                    ride={ride} 
+                    showRider
+                    onClick={(r) => alert(`Ride #${r.ride_id} with ${r.rider_name}\nStatus: ${r.ride_status}`)} 
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Map ─────────────────────────────────────────────── */}
-      <div style={{ flex: 1, height: '100vh', overflow: 'hidden' }}>
+      <div className="map-viewport">
         <RouteMap
-          origin={activeRide ? null : null}
-          destination={null}
+          origin={mapOrigin}
+          destination={mapDestination}
         />
       </div>
 
