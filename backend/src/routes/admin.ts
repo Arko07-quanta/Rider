@@ -47,6 +47,27 @@ router.post("/verify-driver/:id", authenticateAdmin, async (req: any, res: any) 
   }
 });
 
+router.delete("/decline-driver/:id", authenticateAdmin, async (req: any, res: any) => {
+  const { id } = req.params;
+  const client = await pool.connect();
+  
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM vehicles WHERE driver_id = $1", [id]);
+    await client.query("DELETE FROM drivers WHERE user_id = $1", [id]);
+    await client.query("DELETE FROM wallets WHERE user_id = $1", [id]);
+    await client.query("DELETE FROM users WHERE user_id = $1", [id]);
+    await client.query("COMMIT");
+    res.json({ message: "Driver declined and deleted" });
+  } catch (err: any) {
+    await client.query("ROLLBACK");
+    console.error("Decline driver error:", err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 router.get("/users", authenticateAdmin, async (req: any, res: any) => {
   try {
     const result = await pool.query(`

@@ -13,9 +13,10 @@ interface VerificationPanelProps {
   drivers: PendingDriver[];
   loading: boolean;
   onVerify: (userId: string) => void;
+  onDecline: (userId: string) => void;
 }
 
-export default function VerificationPanel({ drivers, loading, onVerify }: VerificationPanelProps) {
+export default function VerificationPanel({ drivers, loading, onVerify, onDecline }: VerificationPanelProps) {
   return (
     <>
       <h2>Drivers Awaiting Approval</h2>
@@ -55,6 +56,13 @@ export default function VerificationPanel({ drivers, loading, onVerify }: Verifi
                     onClick={() => onVerify(driver.user_id)}
                   >
                     Approve
+                  </button>
+                  <button
+                    className="btn-decline"
+                    style={{ marginLeft: "8px", backgroundColor: "#ff4d4f", color: "white", border: "none", padding: "6px 12px", borderRadius: "4px", cursor: "pointer" }}
+                    onClick={() => onDecline(driver.user_id)}
+                  >
+                    Decline
                   </button>
                 </td>
               </tr>

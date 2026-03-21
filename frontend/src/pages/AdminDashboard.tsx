@@ -34,6 +34,17 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleDecline = async (userId: string) => {
+    if (!window.confirm("Decline and delete this driver?")) return;
+    try {
+      await api.delete(`/api/admin/decline-driver/${userId}`);
+      setDrivers(drivers.filter(d => d.user_id !== userId));
+    } catch (err) {
+      console.error("Decline failed:", err);
+      alert("Action failed");
+    }
+  };
+
   useEffect(() => {
     fetchQueue();
   }, []);
@@ -85,6 +96,7 @@ export default function AdminDashboard() {
               drivers={drivers}
               loading={loading}
               onVerify={handleVerify}
+              onDecline={handleDecline}
             />
           )}
           {activePanel === "users" && <UserManagementPanel />}
