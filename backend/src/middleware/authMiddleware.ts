@@ -19,7 +19,7 @@ export const authenticateAdmin = async (req: any, res: any, next: any) => {
 
     next();
   } catch (err) {
-    res.status(401).json({ message: "Invalid token" });
+    res.status(401).json({ message: "Invalid or expired token" });
   }
 };
 

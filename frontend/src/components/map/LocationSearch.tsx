@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 
 export interface LocationData {
   address: string;
@@ -15,6 +15,7 @@ export default function LocationSearch({ placeholder, onSelect }: LocationSearch
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<{place_id: string, display_name: string, lat: string, lon: string}[]>([]);
   const [isOpen, setIsOpen] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const searchOSM = useCallback(async (text: string) => {
     if (!text || text.length < 3) {
@@ -23,7 +24,9 @@ export default function LocationSearch({ placeholder, onSelect }: LocationSearch
       return;
     }
     try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(text)}`);
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(text)}`, {
+        headers: { 'Accept-Language': 'en' }
+      });
       const data = await res.json();
       setResults(data);
       setIsOpen(true);
@@ -35,7 +38,10 @@ export default function LocationSearch({ placeholder, onSelect }: LocationSearch
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setQuery(val);
-    searchOSM(val);
+    // Cancel any previously scheduled search
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    // Only fire the API call 350ms after user stops typing
+    debounceRef.current = setTimeout(() => searchOSM(val), 350);
   };
 
   const handleSelect = (item: any) => {

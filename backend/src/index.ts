@@ -3,6 +3,7 @@ import express, { Request, Response } from "express";
 import cors from "cors";
 import authRoutes from "./routes/auth";
 import adminRoutes from "./routes/admin";
+import ridesRoutes from "./routes/rides";
 import pool from "./db";
 import bcrypt from "bcrypt";
 
@@ -14,6 +15,7 @@ app.use(express.json());
 
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/rides", ridesRoutes);
 
 app.get("/", (_req: Request, res: Response) => res.send("Hello World 💖"));
 
@@ -76,28 +78,41 @@ const initializeDatabase = async () => {
     ];
 
     for (const user of fakeUsers) {
+      let userId: number;
+
       const userExists = await pool.query(
-        "SELECT 1 FROM users WHERE email=$1",
+        "SELECT user_id FROM users WHERE email=$1",
         [user.email]
       );
 
       if (userExists.rows.length > 0) {
-        console.log(`✅ User ${user.email} already exists`);
-        continue;
+        userId = userExists.rows[0].user_id;
+        console.log(`✅ User ${user.email} already exists — ensuring role table row...`);
+      } else {
+        const hashedPassword = await bcrypt.hash(user.password, 10);
+        const newUser = await pool.query(
+          `INSERT INTO users (name, email, phone, password_hash, role)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING user_id`,
+          [user.name, user.email, user.phone, hashedPassword, user.role]
+        );
+        userId = newUser.rows[0].user_id;
+        console.log(`✅ Created user: ${user.email}`);
       }
 
-      const hashedPassword = await bcrypt.hash(user.password, 10);
-      
-      const newUser = await pool.query(
-        `INSERT INTO users (name, email, phone, password_hash, role)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING user_id, name, email, role`,
-        [user.name, user.email, user.phone, hashedPassword, user.role]
-      );
+      // Always ensure the role-specific row exists (ON CONFLICT DO NOTHING = safe to re-run)
+      if (user.role === 'rider') {
+        await pool.query("INSERT INTO riders (user_id) VALUES ($1) ON CONFLICT DO NOTHING", [userId]);
+      } else if (user.role === 'driver') {
+        await pool.query(
+          "INSERT INTO drivers (user_id, license_number, is_verified) VALUES ($1, 'TEST-LICENSE', TRUE) ON CONFLICT DO NOTHING",
+          [userId]
+        );
+      } else if (user.role === 'admin') {
+        await pool.query("INSERT INTO admins (user_id, access_level) VALUES ($1, 99) ON CONFLICT DO NOTHING", [userId]);
+      }
 
-      await pool.query("INSERT INTO wallets (user_id, balance) VALUES ($1, 0.00)", [newUser.rows[0].user_id]);
-
-      console.log(`✅ Created user & wallet: ${newUser.rows[0].email}`);
+      await pool.query("INSERT INTO wallets (user_id, balance) VALUES ($1, 0.00) ON CONFLICT DO NOTHING", [userId]);
     }
 
     console.log("🚀 Database Initialization Complete.");

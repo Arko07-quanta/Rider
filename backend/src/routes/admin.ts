@@ -85,11 +85,15 @@ router.get("/users", authenticateAdmin, async (req: any, res: any) => {
 router.get("/active-rides", authenticateAdmin, async (req: any, res: any) => {
   try {
     const result = await pool.query(`
-      SELECT r.ride_id, u1.name AS rider_name, u2.name AS driver_name, r.status, r.distance AS distance_km, r.fare AS fare_amount
+      SELECT r.ride_id, u1.name AS rider_name, u2.name AS driver_name, r.status,
+             r.distance AS distance_km, r.fare AS fare_amount,
+             lp.address AS pickup_address, ld.address AS dropoff_address
       FROM rides r
       JOIN ride_requests req ON r.request_id = req.request_id
       JOIN users u1 ON req.rider_id = u1.user_id
       LEFT JOIN users u2 ON r.driver_id = u2.user_id
+      LEFT JOIN locations lp ON r.pickup_location_id = lp.location_id
+      LEFT JOIN locations ld ON r.dropoff_location_id = ld.location_id
       WHERE r.status = 'ongoing'
       ORDER BY r.ride_id DESC
       LIMIT 100

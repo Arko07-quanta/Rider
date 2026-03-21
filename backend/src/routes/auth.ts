@@ -34,7 +34,13 @@ router.post("/signup", async (req: any, res: any) => {
         "INSERT INTO vehicles (driver_id, vehicle_type_id, plate_number, brand, model) VALUES ($1, $2, $3, $4, $5)",
         [userId, vehicle_type_id, plate, brand, model]
       );
+    } else if (role === 'rider') {
+      await client.query("INSERT INTO riders (user_id) VALUES ($1)", [userId]);
+    } else if (role === 'admin') {
+      await client.query("INSERT INTO admins (user_id, access_level) VALUES ($1, 1)", [userId]);
     }
+
+    await client.query("INSERT INTO wallets (user_id, balance) VALUES ($1, 0.00)", [userId]);
 
     await client.query('COMMIT');
 
