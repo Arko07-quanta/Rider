@@ -118,12 +118,14 @@ router.get("/my-request", authenticateToken, async (req: any, res: any) => {
               u.name AS driver_name, u.phone AS driver_phone,
               lp.address AS pickup_address, ld.address AS dropoff_address,
               lp.latitude AS pickup_lat, lp.longitude AS pickup_lng,
-              ld.latitude AS dropoff_lat, ld.longitude AS dropoff_lng
+              ld.latitude AS dropoff_lat, ld.longitude AS dropoff_lng,
+              d.current_lat AS driver_lat, d.current_lng AS driver_lng
        FROM ride_requests rq
        LEFT JOIN rides r ON r.request_id = rq.request_id
        LEFT JOIN locations lp ON lp.location_id = r.pickup_location_id
        LEFT JOIN locations ld ON ld.location_id = r.dropoff_location_id
        LEFT JOIN users u ON u.user_id = r.driver_id
+       LEFT JOIN drivers d ON d.user_id = r.driver_id
        WHERE rq.rider_id = $1
        ORDER BY rq.created_at DESC LIMIT 1`,
       [rider_id]
@@ -372,5 +374,22 @@ router.post("/driver-cancel/:rideId", authenticateToken, async (req: any, res: a
   }
 });
 
+// ── DRIVER: Update current location ──────────────────────────────────────
+router.post("/location", authenticateToken, async (req: any, res: any) => {
+  const { lat, lng } = req.body;
+  const user_id = req.user.id;
+  try {
+    await pool.query(
+      "UPDATE drivers SET current_lat = $1, current_lng = $2, updated_at = NOW() WHERE user_id = $3",
+      [lat, lng, user_id]
+    );
+    res.json({ message: "Location updated" });
+  } catch (err: any) {
+    console.error("Update location error:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
 export default router;
+
 

@@ -38,6 +38,7 @@ export default function Driver() {
   const [history, setHistory] = useState<RideData[]>([]);
   const [selectedPreview, setSelectedPreview] = useState<PendingRequest | null>(null);
   const [accepting, setAccepting] = useState<number | null>(null);
+  const [selfLocation, setSelfLocation] = useState<{lat: number, lng: number} | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = useCallback(() => {
@@ -88,6 +89,47 @@ export default function Driver() {
     fetchHistory();
     return () => stopPolling();
   }, [pollActiveRide, pollPendingRequests, stopPolling, fetchHistory]);
+
+  // Real-time location sync with IP fallback
+  useEffect(() => {
+    const fetchIPLocation = async () => {
+      try {
+        const res = await fetch('https://ipapi.co/json/');
+        const data = await res.json();
+        if (data.latitude && data.longitude) {
+          const lat = data.latitude;
+          const lng = data.longitude;
+          setSelfLocation({ lat, lng });
+          await api.post('/api/rides/location', { lat, lng });
+        }
+      } catch (err) {
+        console.error('IP location fallback failed:', err);
+      }
+    };
+
+    if (!navigator.geolocation) {
+      fetchIPLocation();
+      return;
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      async (pos) => {
+        const { latitude: lat, longitude: lng } = pos.coords;
+        setSelfLocation({ lat, lng });
+        try {
+          await api.post('/api/rides/location', { lat, lng });
+        } catch (err) {
+          console.error('Location sync error:', err);
+        }
+      },
+      (err) => {
+        console.error('Driver geolocation error:', err);
+        fetchIPLocation();
+      },
+      { enableHighAccuracy: true, timeout: 5000 }
+    );
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, []);
 
   const handleAccept = async (requestId: number) => {
     setAccepting(requestId);
@@ -292,6 +334,7 @@ export default function Driver() {
         <RouteMap
           origin={mapOrigin}
           destination={mapDestination}
+          userLocation={selfLocation}
         />
       </div>
 

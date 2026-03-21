@@ -18,6 +18,10 @@ export default function Rider() {
   const [requests, setRequests] = useState<RideData[]>([]);
   const [statusMsg, setStatusMsg] = useState('');
   const [selectedHistoryRide, setSelectedHistoryRide] = useState<RideData | null>(null);
+  const [selfLocation, setSelfLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [activeDriverLocation, setActiveDriverLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [pickingMode, setPickingMode] = useState<'pickup' | 'dropoff' | null>(null);
+  const [isLocationEstimated, setIsLocationEstimated] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = useCallback(() => {
@@ -26,6 +30,34 @@ export default function Rider() {
       pollRef.current = null;
     }
   }, []);
+
+  const reverseGeocode = async (lat: number, lng: number) => {
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`);
+      const data = await res.json();
+      return data.display_name;
+    } catch (err) {
+      console.error('Reverse geocode error:', err);
+      return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    }
+  };
+
+  const handleMapClick = async (latlng: { lat: number, lng: number }) => {
+    if (!pickingMode) return;
+    const address = await reverseGeocode(latlng.lat, latlng.lng);
+    const loc = { address, lat: latlng.lat, lng: latlng.lng };
+    if (pickingMode === 'pickup') setPickup(loc);
+    else setDropoff(loc);
+    setPickingMode(null);
+  };
+
+  const handleUseMyLocation = async (target: 'pickup' | 'dropoff') => {
+    if (!selfLocation) return;
+    const address = await reverseGeocode(selfLocation.lat, selfLocation.lng);
+    const loc = { address, lat: selfLocation.lat, lng: selfLocation.lng };
+    if (target === 'pickup') setPickup(loc);
+    else setDropoff(loc);
+  };
 
   const fetchHistory = useCallback(async () => {
     try {
@@ -41,16 +73,52 @@ export default function Rider() {
       const { data } = await api.get('/api/rides/my-request');
       if (data.phase === 'matched') {
         setPhase('matched');
+        if (data.ride.driver_lat && data.ride.driver_lng) {
+          setActiveDriverLocation({ lat: Number(data.ride.driver_lat), lng: Number(data.ride.driver_lng) });
+        }
       } else if (data.phase === 'pending') {
         setPhase('pending');
+        setActiveDriverLocation(null);
       } else {
         setPhase('idle');
+        setActiveDriverLocation(null);
       }
       fetchHistory();
     } catch (err) {
       console.error('CheckState error:', err);
     }
   }, [fetchHistory]);
+
+  // Self location tracking with IP fallback
+  useEffect(() => {
+    const fetchIPLocation = async () => {
+      try {
+        const res = await fetch('https://ipapi.co/json/');
+        const data = await res.json();
+        if (data.latitude && data.longitude) {
+          setSelfLocation({ lat: data.latitude, lng: data.longitude });
+          setIsLocationEstimated(true);
+        }
+      } catch (err) {
+        console.error('IP location fallback failed:', err);
+      }
+    };
+
+    if (!navigator.geolocation) {
+      fetchIPLocation();
+      return;
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => setSelfLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      (err) => {
+        console.error('Rider geolocation error:', err);
+        fetchIPLocation();
+      },
+      { enableHighAccuracy: true, timeout: 5000 }
+    );
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, []);
 
   // Polling logic: if any request is active, keep polling
   useEffect(() => {
@@ -144,15 +212,63 @@ export default function Rider() {
           <div className="tab-content">
             <h2 className="rider-title">Where to?</h2>
 
+            {isLocationEstimated && (
+              <div className="location-warning-banner animated fadeIn">
+                ⚠️ Location sensor unavailable. Using network estimation.
+              </div>
+            )}
+
             <div className="search-group">
               <h4 className="search-label">Pickup</h4>
-              <LocationSearch placeholder="Enter pickup location" onSelect={setPickup} />
+              <div className="search-row-wrapper">
+                <LocationSearch 
+                  placeholder="Enter pickup location" 
+                  onSelect={setPickup} 
+                  value={pickup?.address}
+                />
+                <div className="search-addons">
+                  <button 
+                    className={`addon-btn ${pickingMode === 'pickup' ? 'active' : ''}`}
+                    onClick={() => setPickingMode(pickingMode === 'pickup' ? null : 'pickup')}
+                    title="Pick on map"
+                  >📍</button>
+                  <button 
+                    className="addon-btn"
+                    onClick={() => handleUseMyLocation('pickup')}
+                    title="Use my location"
+                  >🏠</button>
+                </div>
+              </div>
             </div>
 
             <div className="search-group">
               <h4 className="search-label">Drop-off</h4>
-              <LocationSearch placeholder="Enter destination" onSelect={setDropoff} />
+              <div className="search-row-wrapper">
+                <LocationSearch 
+                  placeholder="Enter destination" 
+                  onSelect={setDropoff} 
+                  value={dropoff?.address}
+                />
+                <div className="search-addons">
+                  <button 
+                    className={`addon-btn ${pickingMode === 'dropoff' ? 'active' : ''}`}
+                    onClick={() => setPickingMode(pickingMode === 'dropoff' ? null : 'dropoff')}
+                    title="Pick on map"
+                  >📍</button>
+                  <button 
+                    className="addon-btn"
+                    onClick={() => handleUseMyLocation('dropoff')}
+                    title="Use my location"
+                  >🏠</button>
+                </div>
+              </div>
             </div>
+
+            {pickingMode && (
+              <div className="picking-indicator">
+                🎯 Click on the map to set <strong>{pickingMode}</strong>...
+              </div>
+            )}
 
             {distance && duration && (
               <div className="estimate-card">
@@ -175,7 +291,6 @@ export default function Rider() {
               </div>
             )}
 
-            {/* If the current interaction is pending, show a small status chip */}
             {running.length > 0 && (
               <div className="active-count-badge">
                 You have {running.length} active request{running.length > 1 ? 's' : ''}. 
@@ -185,13 +300,12 @@ export default function Rider() {
           </div>
         ) : (
           <div className="tab-content">
+            <h2 className="rider-title">My Activity</h2>
             
             {selectedHistoryRide && (
               <div className="preview-card history-preview">
                 <div className="preview-header">
-                  <h4 className="preview-title">
-                    {selectedHistoryRide.ride_status === 'completed' ? '🏁 Past Trip Path' : '⏳ Action Required'}
-                  </h4>
+                  <h4 className="preview-title">Past Trip Path</h4>
                   <button className="close-preview" onClick={() => setSelectedHistoryRide(null)}>✕</button>
                 </div>
                 <div className="preview-body">
@@ -210,9 +324,7 @@ export default function Rider() {
               <div className="history-section">
                 <h3 className="section-title">Running</h3>
                 <div className="request-list">
-                  {running.length === 0 ? (
-                    <div className="no-activity">No active requests.</div>
-                  ) : (
+                  {running.length === 0 ? <p className="no-activity">No active requests.</p> : 
                     running.map(req => (
                       <RideItem 
                         key={req.request_id} 
@@ -221,16 +333,14 @@ export default function Rider() {
                         active={selectedHistoryRide?.request_id === req.request_id}
                       />
                     ))
-                  )}
+                  }
                 </div>
               </div>
 
               <div className="history-section" style={{ marginTop: '24px' }}>
                 <h3 className="section-title">Completed</h3>
                 <div className="request-list">
-                  {completed.length === 0 ? (
-                    <div className="no-activity">No past trips.</div>
-                  ) : (
+                  {completed.length === 0 ? <p className="no-activity">No past trips.</p> : 
                     completed.map(req => (
                       <RideItem 
                         key={req.request_id} 
@@ -239,7 +349,7 @@ export default function Rider() {
                         active={selectedHistoryRide?.request_id === req.request_id}
                       />
                     ))
-                  )}
+                  }
                 </div>
               </div>
             </div>
@@ -252,6 +362,9 @@ export default function Rider() {
         <RouteMap
           origin={mapOrigin}
           destination={mapDestination}
+          userLocation={selfLocation}
+          driverLocation={activeDriverLocation}
+          onMapClick={handleMapClick}
           onRouteCalculated={handleRouteCalculated}
         />
       </div>

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import "./LocationSearch.css";
 
 export interface LocationData {
@@ -10,13 +10,18 @@ export interface LocationData {
 interface LocationSearchProps {
   placeholder: string;
   onSelect: (location: LocationData) => void;
+  value?: string;
 }
 
-export default function LocationSearch({ placeholder, onSelect }: LocationSearchProps) {
-  const [query, setQuery] = useState("");
+export default function LocationSearch({ placeholder, onSelect, value }: LocationSearchProps) {
+  const [query, setQuery] = useState(value || "");
   const [results, setResults] = useState<{place_id: string, display_name: string, lat: string, lon: string}[]>([]);
   const [isOpen, setIsOpen] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (value !== undefined) setQuery(value);
+  }, [value]);
 
   const searchOSM = useCallback(async (text: string) => {
     if (!text || text.length < 3) {
