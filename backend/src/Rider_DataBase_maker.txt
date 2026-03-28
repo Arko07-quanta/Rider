@@ -1,0 +1,253 @@
+DROP TABLE IF EXISTS
+  chat_messages,
+  admin_actions,
+  promotions,
+  driver_status,
+  trip_history,
+  reviews,
+  ride_cancellations,
+  transactions,
+  rides,
+  ride_requests,
+  saved_locations,
+  payment_accounts,
+  payment_types,
+  wallets,
+  vehicles,
+  vehicle_types,
+  locations,
+  drivers,
+  riders,
+  admins,
+  users
+CASCADE;
+
+DROP TYPE IF EXISTS
+  discount_type,
+  review_type,
+  cancel_actor,
+  transaction_status,
+  transaction_type,
+  ride_status,
+  ride_request_status,
+  user_status,
+  user_role;
+
+CREATE TYPE user_role AS ENUM ('admin','rider','driver');
+CREATE TYPE user_status AS ENUM ('active','inactive','suspended');
+CREATE TYPE ride_request_status AS ENUM ('pending','accepted','rejected','cancelled');
+CREATE TYPE ride_status AS ENUM ('ongoing','completed','cancelled','no_show');
+CREATE TYPE transaction_type AS ENUM ('credit','debit');
+CREATE TYPE transaction_status AS ENUM ('pending','completed','failed');
+CREATE TYPE cancel_actor AS ENUM ('rider','driver','admin');
+CREATE TYPE review_type AS ENUM ('rider_to_driver','driver_to_rider');
+CREATE TYPE discount_type AS ENUM ('percentage','fixed');
+
+CREATE TABLE users (
+  user_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  email VARCHAR(100) UNIQUE NOT NULL,
+  phone VARCHAR(20) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  role user_role NOT NULL,
+  status user_status DEFAULT 'active',
+  email_verified BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP
+);
+
+CREATE TABLE admins (
+  user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+  access_level INT NOT NULL
+);
+
+CREATE TABLE riders (
+  user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE
+);
+
+CREATE TABLE drivers (
+  user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
+  license_number VARCHAR(50) UNIQUE NOT NULL,
+  rating NUMERIC(3,2) DEFAULT 5.00 CHECK (rating BETWEEN 0 AND 5),
+  is_verified BOOLEAN DEFAULT FALSE,
+  current_lat NUMERIC(9,6),
+  current_lng NUMERIC(9,6),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP
+);
+
+CREATE TABLE locations (
+  location_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  latitude NUMERIC(9,6) NOT NULL,
+  longitude NUMERIC(9,6) NOT NULL,
+  address TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE vehicle_types (
+  vehicle_type_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  type_name VARCHAR(50) NOT NULL,
+  max_passengers INT NOT NULL,
+  max_weight NUMERIC(10,2),
+  average_speed NUMERIC(6,2),
+  base_fare NUMERIC(10,2) NOT NULL,
+  fare_per_km NUMERIC(10,2) NOT NULL,
+  fare_per_minute NUMERIC(10,2) NOT NULL,
+  minimum_fare NUMERIC(10,2) NOT NULL,
+  cancellation_fare NUMERIC(10,2) DEFAULT 0.00
+);
+
+CREATE TABLE vehicles (
+  vehicle_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  driver_id BIGINT REFERENCES drivers(user_id) ON DELETE SET NULL,
+  vehicle_type_id BIGINT NOT NULL REFERENCES vehicle_types(vehicle_type_id),
+  plate_number VARCHAR(20) UNIQUE NOT NULL,
+  brand VARCHAR(50),
+  model VARCHAR(50),
+  year INT,
+  color VARCHAR(30),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP
+);
+
+CREATE TABLE wallets (
+  wallet_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id BIGINT UNIQUE NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+  balance NUMERIC(15,2) DEFAULT 0.00,
+  currency CHAR(3) DEFAULT 'USD',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP
+);
+
+CREATE TABLE payment_types (
+  payment_type_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  company_name VARCHAR(100) NOT NULL,
+  logo VARCHAR(255),
+  description TEXT
+);
+
+CREATE TABLE payment_accounts (
+  payment_acc_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+  payment_type_id BIGINT NOT NULL REFERENCES payment_types(payment_type_id),
+  account_identifier VARCHAR(255) NOT NULL,
+  metadata JSONB,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE saved_locations (
+  saved_location_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  rider_id BIGINT NOT NULL REFERENCES riders(user_id) ON DELETE CASCADE,
+  location_id BIGINT NOT NULL REFERENCES locations(location_id) ON DELETE CASCADE,
+  label VARCHAR(50),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE ride_requests (
+  request_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  rider_id BIGINT NOT NULL REFERENCES riders(user_id) ON DELETE CASCADE,
+  vehicle_type_id BIGINT NOT NULL REFERENCES vehicle_types(vehicle_type_id),
+  requested_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  status ride_request_status DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE rides (
+  ride_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  request_id BIGINT UNIQUE NOT NULL REFERENCES ride_requests(request_id),
+  driver_id BIGINT REFERENCES drivers(user_id) ON DELETE SET NULL,
+  vehicle_id BIGINT REFERENCES vehicles(vehicle_id) ON DELETE SET NULL,
+  pickup_location_id BIGINT NOT NULL REFERENCES locations(location_id),
+  dropoff_location_id BIGINT NOT NULL REFERENCES locations(location_id),
+  start_time TIMESTAMP,
+  end_time TIMESTAMP,
+  distance NUMERIC(10,2) DEFAULT 0.00 CHECK (distance >= 0),
+  fare NUMERIC(10,2) DEFAULT 0.00 CHECK (fare >= 0),
+  status ride_status DEFAULT 'ongoing',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP
+);
+
+CREATE TABLE transactions (
+  transaction_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  wallet_id BIGINT NOT NULL REFERENCES wallets(wallet_id) ON DELETE CASCADE,
+  ride_id BIGINT REFERENCES rides(ride_id) ON DELETE SET NULL,
+  type transaction_type NOT NULL,
+  amount NUMERIC(15,2) NOT NULL CHECK (amount >= 0),
+  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  status transaction_status DEFAULT 'completed',
+  payment_method VARCHAR(50),
+  external_ref VARCHAR(128)
+);
+
+CREATE TABLE ride_cancellations (
+  cancellation_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  ride_id BIGINT UNIQUE NOT NULL REFERENCES rides(ride_id) ON DELETE CASCADE,
+  cancelled_by cancel_actor NOT NULL,
+  reason TEXT,
+  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE reviews (
+  review_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  ride_id BIGINT NOT NULL REFERENCES rides(ride_id) ON DELETE CASCADE,
+  author_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+  rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  comment TEXT,
+  review_type review_type NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE chat_messages (
+  message_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  ride_id BIGINT NOT NULL REFERENCES rides(ride_id) ON DELETE CASCADE,
+  sender_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+  message_text TEXT NOT NULL,
+  sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  is_read BOOLEAN DEFAULT FALSE
+);
+
+CREATE TABLE trip_history (
+  history_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  ride_id BIGINT NOT NULL REFERENCES rides(ride_id) ON DELETE CASCADE,
+  location_id BIGINT REFERENCES locations(location_id) ON DELETE SET NULL,
+  latitude NUMERIC(9,6),
+  longitude NUMERIC(9,6),
+  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE driver_status (
+  driver_id BIGINT PRIMARY KEY REFERENCES drivers(user_id) ON DELETE CASCADE,
+  is_online BOOLEAN DEFAULT FALSE,
+  is_available BOOLEAN DEFAULT FALSE,
+  last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  latitude NUMERIC(9,6),
+  longitude NUMERIC(9,6)
+);
+
+CREATE TABLE promotions (
+  promo_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  code VARCHAR(50) UNIQUE NOT NULL,
+  discount_type discount_type NOT NULL,
+  value NUMERIC(10,2) NOT NULL,
+  discount_amount NUMERIC(10,2),
+  usage_limit INT,
+  expiry_date DATE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE admin_actions (
+  action_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  admin_id BIGINT REFERENCES admins(user_id) ON DELETE SET NULL,
+  action_description TEXT,
+  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_phone ON users(phone);
+CREATE INDEX idx_rides_driver ON rides(driver_id);
+CREATE INDEX idx_rides_status ON rides(status);
+CREATE INDEX idx_ride_requests_rider ON ride_requests(rider_id);
+CREATE INDEX idx_transactions_wallet_ts ON transactions(wallet_id, timestamp);
+CREATE INDEX idx_trip_history_ride_ts ON trip_history(ride_id, timestamp);
+CREATE INDEX idx_saved_locations_rider ON saved_locations(rider_id);

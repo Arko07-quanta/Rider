@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import './Driver.css';
 import RouteMap from '../components/map/RouteMap';
 import RideItem, { type RideData } from '../components/rides/RideItem';
+import Chat from '../components/chat/Chat';
 import api from '../api/axios';
 
 type Phase = 'searching' | 'active';
@@ -337,6 +338,10 @@ export default function Driver() {
           userLocation={selfLocation}
         />
       </div>
+
+      {phase === 'active' && activeRide && (
+        <Chat rideId={activeRide.ride_id} theirName={activeRide.rider_name} />
+      )}
 
     </div>
   );

@@ -4,6 +4,7 @@ import cors from "cors";
 import authRoutes from "./routes/auth";
 import adminRoutes from "./routes/admin";
 import ridesRoutes from "./routes/rides";
+import chatRoutes from "./routes/chat";
 import pool from "./db";
 import bcrypt from "bcrypt";
 
@@ -16,6 +17,7 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/rides", ridesRoutes);
+app.use("/api/chat", chatRoutes);
 
 app.get("/", (_req: Request, res: Response) => res.send("Hello World 💖"));
 
@@ -58,21 +60,22 @@ const initializeDatabase = async () => {
         name: "Test Rider",
         email: "rider@example.com",
         phone: "1111111111",
-        password: "password123",
+        password: "1234",
         role: "rider"
       },
       {
         name: "Test Driver",
         email: "driver@example.com",
         phone: "2222222222",
-        password: "password123",
+        password: "1234",
         role: "driver"
       },
+
       {
         name: "Admin User",
         email: "admin@example.com",
         phone: "3333333333",
-        password: "admin123",
+        password: "1234",
         role: "admin"
       }
     ];
@@ -104,10 +107,26 @@ const initializeDatabase = async () => {
       if (user.role === 'rider') {
         await pool.query("INSERT INTO riders (user_id) VALUES ($1) ON CONFLICT DO NOTHING", [userId]);
       } else if (user.role === 'driver') {
+        // Complete the driver profile
         await pool.query(
-          "INSERT INTO drivers (user_id, license_number, is_verified) VALUES ($1, 'TEST-LICENSE', TRUE) ON CONFLICT DO NOTHING",
+          "INSERT INTO drivers (user_id, license_number, is_verified, rating) VALUES ($1, 'TEST-LICENSE-999', TRUE, 4.95) ON CONFLICT DO NOTHING",
           [userId]
         );
+        
+        // Add driver online status
+        await pool.query(
+          "INSERT INTO driver_status (driver_id, is_online, is_available) VALUES ($1, TRUE, TRUE) ON CONFLICT DO NOTHING",
+          [userId]
+        );
+        
+        // Add full vehicle details
+        const carType = await pool.query("SELECT vehicle_type_id FROM vehicle_types WHERE type_name = 'Car' LIMIT 1");
+        if (carType.rows.length > 0) {
+           await pool.query(
+             "INSERT INTO vehicles (driver_id, vehicle_type_id, plate_number, brand, model, year, color) VALUES ($1, $2, 'TEST-PLATE-001', 'Toyota', 'Prius', 2022, 'Silver') ON CONFLICT (plate_number) DO NOTHING",
+             [userId, carType.rows[0].vehicle_type_id]
+           );
+        }
       } else if (user.role === 'admin') {
         await pool.query("INSERT INTO admins (user_id, access_level) VALUES ($1, 99) ON CONFLICT DO NOTHING", [userId]);
       }

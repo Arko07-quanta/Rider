@@ -13,6 +13,19 @@ async function insertLocation(client: any, lat: number, lng: number, address: st
   return res.rows[0].location_id;
 }
 
+// ── RIDER & DRIVER: Get available vehicle types ─────────────────────────
+router.get("/vehicle-types", authenticateToken, async (req: any, res: any) => {
+  try {
+    const result = await pool.query(
+      `SELECT vehicle_type_id, type_name, max_passengers, base_fare, minimum_fare FROM vehicle_types ORDER BY vehicle_type_id ASC`
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error("Vehicle types error:", err);
+    res.status(500).json({ message: "Failed to fetch vehicle types" });
+  }
+});
+
 // ── RIDER: Create a ride request ─────────────────────────────────────────
 // We store pickup/dropoff as location rows and attach a pending ride_request.
 // The locations are attached to the rides row when a driver accepts.
@@ -23,12 +36,16 @@ async function insertLocation(client: any, lat: number, lng: number, address: st
 // Actual approach: store locations upfront, create ride_requests row, 
 // and create a placeholder rides row pointing to them so drivers can query.
 router.post("/request", authenticateToken, async (req: any, res: any) => {
-  const { pickup_address, dropoff_address, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng } = req.body;
+  const { pickup_address, dropoff_address, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, vehicle_type_id } = req.body;
+  if (!vehicle_type_id) {
+    return res.status(400).json({ message: "vehicle_type_id is required" });
+  }
   const rider_id = req.user.id;
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
+    console.log(rider_id);
 
     // Cancel any existing pending request from this rider
     const existingReqs = await client.query(
@@ -49,8 +66,8 @@ router.post("/request", authenticateToken, async (req: any, res: any) => {
 
     // Create the ride_request
     const reqResult = await client.query(
-      `INSERT INTO ride_requests (rider_id, status) VALUES ($1, 'pending') RETURNING request_id`,
-      [rider_id]
+      `INSERT INTO ride_requests (rider_id, vehicle_type_id, status) VALUES ($1, $2, 'pending') RETURNING request_id`,
+      [rider_id, vehicle_type_id]
     );
     const request_id = reqResult.rows[0].request_id;
 
@@ -181,21 +198,26 @@ router.delete("/cancel", authenticateToken, async (req: any, res: any) => {
 
 // ── DRIVER: Get all pending requests (with location info) ─────────────────
 router.get("/pending", authenticateToken, async (req: any, res: any) => {
+  const driver_id = req.user.id;
   try {
     const result = await pool.query(
       `SELECT rq.request_id, u.name AS rider_name,
               lp.address AS pickup_address, ld.address AS dropoff_address,
               lp.latitude AS pickup_lat, lp.longitude AS pickup_lng,
               ld.latitude AS dropoff_lat, ld.longitude AS dropoff_lng,
-              rq.created_at
+              rq.created_at,
+              vt.type_name as vehicle_type
        FROM ride_requests rq
        JOIN users u ON u.user_id = rq.rider_id
        JOIN rides r ON r.request_id = rq.request_id
        JOIN locations lp ON lp.location_id = r.pickup_location_id
        JOIN locations ld ON ld.location_id = r.dropoff_location_id
+       JOIN vehicle_types vt ON vt.vehicle_type_id = rq.vehicle_type_id
        WHERE rq.status = 'pending' AND r.driver_id IS NULL
+         AND EXISTS (SELECT 1 FROM vehicles v WHERE v.driver_id = $1 AND v.vehicle_type_id = rq.vehicle_type_id)
        ORDER BY rq.created_at ASC
-       LIMIT 10`
+       LIMIT 10`,
+      [driver_id]
     );
     res.json(result.rows);
   } catch (err: any) {

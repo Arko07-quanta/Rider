@@ -4,6 +4,7 @@ import LocationSearch from '../components/map/LocationSearch';
 import type { LocationData } from '../components/map/LocationSearch';
 import RouteMap from '../components/map/RouteMap';
 import RideItem, { type RideData } from '../components/rides/RideItem';
+import Chat from '../components/chat/Chat';
 import api from '../api/axios';
 
 type Phase = 'idle' | 'pending' | 'matched';
@@ -22,6 +23,8 @@ export default function Rider() {
   const [activeDriverLocation, setActiveDriverLocation] = useState<{lat: number, lng: number} | null>(null);
   const [pickingMode, setPickingMode] = useState<'pickup' | 'dropoff' | null>(null);
   const [isLocationEstimated, setIsLocationEstimated] = useState(false);
+  const [vehicleTypes, setVehicleTypes] = useState<any[]>([]);
+  const [selectedVehicleType, setSelectedVehicleType] = useState<string>('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = useCallback(() => {
@@ -66,7 +69,7 @@ export default function Rider() {
     } catch (err) {
       console.error('Failed to fetch history:', err);
     }
-  }, []);
+  }, []); 
 
   const checkState = useCallback(async () => {
     try {
@@ -135,6 +138,16 @@ export default function Rider() {
 
   useEffect(() => {
     fetchHistory();
+    const fetchVehicles = async () => {
+      try {
+        const { data } = await api.get('/api/rides/vehicle-types');
+        setVehicleTypes(data);
+        if (data.length > 0) setSelectedVehicleType(data[0].vehicle_type_id);
+      } catch (err) {
+        console.error('Failed to fetch vehicle types:', err);
+      }
+    };
+    fetchVehicles();
   }, [fetchHistory]);
 
   const handleRouteCalculated = (dist: string, dur: string) => {
@@ -153,6 +166,7 @@ export default function Rider() {
         pickup_lng: pickup.lng,
         dropoff_lat: dropoff.lat,
         dropoff_lng: dropoff.lng,
+        vehicle_type_id: selectedVehicleType,
       });
       // Reset for next request
       setPhase('idle');
@@ -277,9 +291,23 @@ export default function Rider() {
                   <span className="estimate-label">Distance:</span>
                   <strong className="estimate-value">{distance}</strong>
                 </div>
-                <div className="estimate-row" style={{ marginBottom: '20px' }}>
+                <div className="estimate-row">
                   <span className="estimate-label">Duration:</span>
                   <strong className="estimate-value">{duration}</strong>
+                </div>
+                <div className="estimate-row" style={{ marginBottom: '20px', alignItems: 'center' }}>
+                  <span className="estimate-label">Vehicle Type:</span>
+                  <select 
+                    value={selectedVehicleType}
+                    onChange={(e) => setSelectedVehicleType(e.target.value)}
+                    style={{ padding: '6px', borderRadius: '4px', flex: 1, marginLeft: '10px' }}
+                  >
+                    {vehicleTypes.map(v => (
+                      <option key={v.vehicle_type_id} value={v.vehicle_type_id}>
+                        {v.type_name} ({v.max_passengers} pax)
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 {statusMsg && <p className="error-msg">{statusMsg}</p>}
                 <button
@@ -368,6 +396,13 @@ export default function Rider() {
           onRouteCalculated={handleRouteCalculated}
         />
       </div>
+
+      {phase === 'matched' && running.find(r => r.ride_status === 'ongoing') && (
+        <Chat 
+          rideId={running.find(r => r.ride_status === 'ongoing')!.ride_id!} 
+          theirName={running.find(r => r.ride_status === 'ongoing')!.driver_name || 'Driver'} 
+        />
+      )}
 
     </div>
   );
