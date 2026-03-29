@@ -103,23 +103,19 @@ const initializeDatabase = async () => {
         console.log(`✅ Created user: ${user.email}`);
       }
 
-      // Always ensure the role-specific row exists (ON CONFLICT DO NOTHING = safe to re-run)
       if (user.role === 'rider') {
         await pool.query("INSERT INTO riders (user_id) VALUES ($1) ON CONFLICT DO NOTHING", [userId]);
       } else if (user.role === 'driver') {
-        // Complete the driver profile
         await pool.query(
           "INSERT INTO drivers (user_id, license_number, is_verified, rating) VALUES ($1, 'TEST-LICENSE-999', TRUE, 4.95) ON CONFLICT DO NOTHING",
           [userId]
         );
-        
-        // Add driver online status
+
         await pool.query(
           "INSERT INTO driver_status (driver_id, is_online, is_available) VALUES ($1, TRUE, TRUE) ON CONFLICT DO NOTHING",
           [userId]
         );
-        
-        // Add full vehicle details
+
         const carType = await pool.query("SELECT vehicle_type_id FROM vehicle_types WHERE type_name = 'Car' LIMIT 1");
         if (carType.rows.length > 0) {
            await pool.query(

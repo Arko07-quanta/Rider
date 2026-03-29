@@ -44,9 +44,7 @@ export default function LocationSearch({ placeholder, onSelect, value }: Locatio
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setQuery(val);
-    // Cancel any previously scheduled search
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    // Only fire the API call 350ms after user stops typing
     debounceRef.current = setTimeout(() => searchOSM(val), 350);
   };
 

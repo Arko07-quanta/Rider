@@ -4,7 +4,6 @@ import { authenticateToken } from "../middleware/authMiddleware";
 
 const router = express.Router();
 
-// Helper: insert a location row and return its ID
 async function insertLocation(client: any, lat: number, lng: number, address: string): Promise<number> {
   const res = await client.query(
     `INSERT INTO locations (latitude, longitude, address) VALUES ($1, $2, $3) RETURNING location_id`,
@@ -13,7 +12,6 @@ async function insertLocation(client: any, lat: number, lng: number, address: st
   return res.rows[0].location_id;
 }
 
-// ── RIDER & DRIVER: Get available vehicle types ─────────────────────────
 router.get("/vehicle-types", authenticateToken, async (req: any, res: any) => {
   try {
     const result = await pool.query(
@@ -26,15 +24,6 @@ router.get("/vehicle-types", authenticateToken, async (req: any, res: any) => {
   }
 });
 
-// ── RIDER: Create a ride request ─────────────────────────────────────────
-// We store pickup/dropoff as location rows and attach a pending ride_request.
-// The locations are attached to the rides row when a driver accepts.
-// To let drivers see pickup/dropoff on the pending list, we store them in a 
-// temporary table-agnostic way: we pre-create a rides row with status 'ongoing'=false
-// by storing locations separately and linking via ride_requests.
-//
-// Actual approach: store locations upfront, create ride_requests row, 
-// and create a placeholder rides row pointing to them so drivers can query.
 router.post("/request", authenticateToken, async (req: any, res: any) => {
   const { pickup_address, dropoff_address, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, vehicle_type_id } = req.body;
   if (!vehicle_type_id) {
@@ -47,7 +36,6 @@ router.post("/request", authenticateToken, async (req: any, res: any) => {
     await client.query("BEGIN");
     console.log(rider_id);
 
-    // Cancel any existing pending request from this rider
     const existingReqs = await client.query(
       `SELECT rq.request_id FROM ride_requests rq WHERE rq.rider_id = $1 AND rq.status = 'pending'`,
       [rider_id]
@@ -60,18 +48,15 @@ router.post("/request", authenticateToken, async (req: any, res: any) => {
       );
     }
 
-    // Insert pickup and dropoff locations
     const pickupLocId = await insertLocation(client, pickup_lat, pickup_lng, pickup_address);
     const dropoffLocId = await insertLocation(client, dropoff_lat, dropoff_lng, dropoff_address);
 
-    // Create the ride_request
     const reqResult = await client.query(
       `INSERT INTO ride_requests (rider_id, vehicle_type_id, status) VALUES ($1, $2, 'pending') RETURNING request_id`,
       [rider_id, vehicle_type_id]
     );
     const request_id = reqResult.rows[0].request_id;
 
-    // Pre-create the rides row (driver_id null until accepted) so drivers can query location info
     await client.query(
       `INSERT INTO rides (request_id, driver_id, pickup_location_id, dropoff_location_id, status)
        VALUES ($1, NULL, $2, $3, 'ongoing')`,
@@ -89,7 +74,6 @@ router.post("/request", authenticateToken, async (req: any, res: any) => {
   }
 });
 
-// ── RIDER: Get all their ride requests (history and current) ─────────────
 router.get("/my-requests", authenticateToken, async (req: any, res: any) => {
   const user_id = req.user.id;
   try {
@@ -125,7 +109,6 @@ router.get("/my-requests", authenticateToken, async (req: any, res: any) => {
   }
 });
 
-// ── RIDER: Poll for their current active request/ride ────────────────────
 router.get("/my-request", authenticateToken, async (req: any, res: any) => {
   const rider_id = req.user.id;
 
@@ -153,11 +136,11 @@ router.get("/my-request", authenticateToken, async (req: any, res: any) => {
     }
 
     const row = result.rows[0];
-    
+
     if (row.request_status === 'accepted' && row.ride_status === 'ongoing') {
       return res.json({ phase: "matched", ride: row });
     }
-    
+
     if (row.request_status === 'pending') {
       return res.json({ phase: "pending", request: row });
     }
@@ -169,11 +152,9 @@ router.get("/my-request", authenticateToken, async (req: any, res: any) => {
   }
 });
 
-// ── RIDER: Cancel their pending request ──────────────────────────────────
 router.delete("/cancel", authenticateToken, async (req: any, res: any) => {
   const rider_id = req.user.id;
   try {
-    // Update the ride_request status to 'cancelled'
     const reqUpdate = await pool.query(
       "UPDATE ride_requests SET status = 'cancelled' WHERE rider_id = $1 AND status = 'pending' RETURNING request_id",
       [rider_id]
@@ -183,7 +164,6 @@ router.delete("/cancel", authenticateToken, async (req: any, res: any) => {
       return res.status(404).json({ message: "No pending request found to cancel." });
     }
 
-    // Also update the associated rides row status if it exists and is not yet accepted
     await pool.query(
       "UPDATE rides SET status = 'cancelled' WHERE request_id = $1 AND driver_id IS NULL",
       [reqUpdate.rows[0].request_id]
@@ -196,7 +176,6 @@ router.delete("/cancel", authenticateToken, async (req: any, res: any) => {
   }
 });
 
-// ── DRIVER: Get all pending requests (with location info) ─────────────────
 router.get("/pending", authenticateToken, async (req: any, res: any) => {
   const driver_id = req.user.id;
   try {
@@ -226,7 +205,6 @@ router.get("/pending", authenticateToken, async (req: any, res: any) => {
   }
 });
 
-// ── DRIVER: Get their own ride history ───────────────────────────────────
 router.get("/activity", authenticateToken, async (req: any, res: any) => {
   const user_id = req.user.id;
   try {
@@ -257,7 +235,6 @@ router.get("/activity", authenticateToken, async (req: any, res: any) => {
   }
 });
 
-// ── DRIVER: Accept a ride request ────────────────────────────────────────
 router.post("/accept/:requestId", authenticateToken, async (req: any, res: any) => {
   const { requestId } = req.params;
   const driver_id = req.user.id;
@@ -266,7 +243,6 @@ router.post("/accept/:requestId", authenticateToken, async (req: any, res: any) 
   try {
     await client.query("BEGIN");
 
-    // Lock and verify the request is still pending
     const reqCheck = await client.query(
       "SELECT request_id FROM ride_requests WHERE request_id = $1 AND status = 'pending' FOR UPDATE",
       [requestId]
@@ -277,13 +253,11 @@ router.post("/accept/:requestId", authenticateToken, async (req: any, res: any) 
       return res.status(409).json({ message: "Request no longer available" });
     }
 
-    // Mark request accepted
     await client.query(
       "UPDATE ride_requests SET status = 'accepted' WHERE request_id = $1",
       [requestId]
     );
 
-    // Assign this driver to the pre-created rides row
     const rideResult = await client.query(
       `UPDATE rides SET driver_id = $1, start_time = NOW(), updated_at = NOW()
        WHERE request_id = $2 AND driver_id IS NULL
@@ -302,7 +276,6 @@ router.post("/accept/:requestId", authenticateToken, async (req: any, res: any) 
   }
 });
 
-// ── DRIVER: Get their current active ride ────────────────────────────────
 router.get("/my-ride", authenticateToken, async (req: any, res: any) => {
   const driver_id = req.user.id;
   try {
@@ -328,7 +301,6 @@ router.get("/my-ride", authenticateToken, async (req: any, res: any) => {
   }
 });
 
-// ── DRIVER: Complete a ride ───────────────────────────────────────────────
 router.post("/complete/:rideId", authenticateToken, async (req: any, res: any) => {
   const { rideId } = req.params;
   const driver_id = req.user.id;
@@ -349,7 +321,6 @@ router.post("/complete/:rideId", authenticateToken, async (req: any, res: any) =
   }
 });
 
-// ── DRIVER: Cancel an ongoing ride ───────────────────────────────────────
 router.post("/driver-cancel/:rideId", authenticateToken, async (req: any, res: any) => {
   const { rideId } = req.params;
   const driver_id = req.user.id;
@@ -358,7 +329,6 @@ router.post("/driver-cancel/:rideId", authenticateToken, async (req: any, res: a
   try {
     await client.query("BEGIN");
 
-    // 1. Update ride status to 'cancelled'
     const rideResult = await client.query(
       `UPDATE rides SET status = 'cancelled', updated_at = NOW()
        WHERE ride_id = $1 AND driver_id = $2 AND status = 'ongoing'
@@ -373,13 +343,11 @@ router.post("/driver-cancel/:rideId", authenticateToken, async (req: any, res: a
 
     const requestId = rideResult.rows[0].request_id;
 
-    // 2. Update the original request status to 'cancelled'
     await client.query(
       "UPDATE ride_requests SET status = 'cancelled' WHERE request_id = $1",
       [requestId]
     );
 
-    // 3. Log into ride_cancellations
     await client.query(
       "INSERT INTO ride_cancellations (ride_id, cancelled_by, reason) VALUES ($1, 'driver', 'Driver initiated cancellation')",
       [rideId]
@@ -396,7 +364,6 @@ router.post("/driver-cancel/:rideId", authenticateToken, async (req: any, res: a
   }
 });
 
-// ── DRIVER: Update current location ──────────────────────────────────────
 router.post("/location", authenticateToken, async (req: any, res: any) => {
   const { lat, lng } = req.body;
   const user_id = req.user.id;
@@ -412,6 +379,28 @@ router.post("/location", authenticateToken, async (req: any, res: any) => {
   }
 });
 
+router.post("/rider-location", authenticateToken, async (req: any, res: any) => {
+  const { lat, lng } = req.body;
+  const user_id = req.user.id;
+  try {
+    const activeRide = await pool.query(
+      `SELECT r.ride_id FROM rides r
+       JOIN ride_requests rq ON rq.request_id = r.request_id
+       WHERE rq.rider_id = $1 AND r.status = 'ongoing'
+       ORDER BY r.ride_id DESC LIMIT 1`,
+      [user_id]
+    );
+    if (activeRide.rows.length > 0) {
+      await pool.query(
+        `INSERT INTO trip_history (ride_id, latitude, longitude) VALUES ($1, $2, $3)`,
+        [activeRide.rows[0].ride_id, lat, lng]
+      );
+    }
+    res.json({ message: "Rider location noted" });
+  } catch (err: any) {
+    console.error("Rider location error:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
 export default router;
-
-

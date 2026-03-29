@@ -4,13 +4,11 @@ import { authenticateToken } from "../middleware/authMiddleware";
 
 const router = express.Router();
 
-// Get chat history for a specific ride
 router.get("/:rideId", authenticateToken, async (req: any, res: any) => {
   const { rideId } = req.params;
   const user_id = req.user.id;
 
   try {
-    // Fetch all messages for the specified ride
     const chatResult = await pool.query(
       `SELECT cm.message_id, cm.sender_id, cm.message_text, cm.sent_at, cm.is_read, u.name as sender_name
        FROM chat_messages cm
@@ -27,7 +25,6 @@ router.get("/:rideId", authenticateToken, async (req: any, res: any) => {
   }
 });
 
-// Send a new chat message
 router.post("/send", authenticateToken, async (req: any, res: any) => {
   const { ride_id, message_text } = req.body;
   const sender_id = req.user.id;
@@ -37,7 +34,6 @@ router.post("/send", authenticateToken, async (req: any, res: any) => {
   }
 
   try {
-    // Verify user is authorized to send a message on this active ride
     const rideCheck = await pool.query(
       `SELECT r.ride_id FROM rides r 
        JOIN ride_requests rq ON r.request_id = rq.request_id

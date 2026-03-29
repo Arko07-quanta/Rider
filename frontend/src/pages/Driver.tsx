@@ -81,7 +81,6 @@ export default function Driver() {
     }
   }, [stopPolling]);
 
-  // On mount: check if there's already an active ride first, then start polling
   useEffect(() => {
     pollActiveRide().then(() => {
       pollRef.current = setInterval(pollPendingRequests, 4000);
@@ -91,7 +90,6 @@ export default function Driver() {
     return () => stopPolling();
   }, [pollActiveRide, pollPendingRequests, stopPolling, fetchHistory]);
 
-  // Real-time location sync with IP fallback
   useEffect(() => {
     const fetchIPLocation = async () => {
       try {
@@ -159,7 +157,6 @@ export default function Driver() {
       setPhase('searching');
       setRequests([]);
       fetchHistory();
-      // Restart polling
       pollRef.current = setInterval(pollPendingRequests, 4000);
       pollPendingRequests();
     } catch (err: any) {
@@ -175,7 +172,6 @@ export default function Driver() {
       setPhase('searching');
       setRequests([]);
       fetchHistory();
-      // Restart polling
       pollRef.current = setInterval(pollPendingRequests, 4000);
       pollPendingRequests();
     } catch (err: any) {
@@ -183,32 +179,31 @@ export default function Driver() {
     }
   };
 
-  const mapOrigin = activeRide 
-    ? { lat: Number(activeRide.pickup_lat), lng: Number(activeRide.pickup_lng) } 
-    : selectedPreview 
-      ? { lat: Number(selectedPreview.pickup_lat), lng: Number(selectedPreview.pickup_lng) } 
+  const mapOrigin = activeRide
+    ? { lat: Number(activeRide.pickup_lat), lng: Number(activeRide.pickup_lng) }
+    : selectedPreview
+      ? { lat: Number(selectedPreview.pickup_lat), lng: Number(selectedPreview.pickup_lng) }
       : null;
 
-  const mapDestination = activeRide 
-    ? { lat: Number(activeRide.dropoff_lat), lng: Number(activeRide.dropoff_lng) } 
-    : selectedPreview 
-      ? { lat: Number(selectedPreview.dropoff_lat), lng: Number(selectedPreview.dropoff_lng) } 
+  const mapDestination = activeRide
+    ? { lat: Number(activeRide.dropoff_lat), lng: Number(activeRide.dropoff_lng) }
+    : selectedPreview
+      ? { lat: Number(selectedPreview.dropoff_lat), lng: Number(selectedPreview.dropoff_lng) }
       : null;
 
   return (
     <div className="driver-container">
 
-      {/* ── Sidebar ─────────────────────────────────────────── */}
       <div className="driver-sidebar">
-        
+
         <div className="tab-header">
-          <button 
+          <button
             className={`tab-btn ${activeTab === 'find' ? 'active' : ''}`}
             onClick={() => setActiveTab('find')}
           >
             Find Rides
           </button>
-          <button 
+          <button
             className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
             onClick={() => { setActiveTab('history'); fetchHistory(); }}
           >
@@ -270,7 +265,7 @@ export default function Driver() {
                     </div>
                     <div className="preview-body">
                       <p><strong>Rider:</strong> {selectedPreview.rider_name}</p>
-                      <button 
+                      <button
                         className="accept-btn full-width"
                         onClick={() => handleAccept(selectedPreview.request_id)}
                         disabled={accepting === selectedPreview.request_id}
@@ -289,8 +284,8 @@ export default function Driver() {
                     </div>
                   ) : (
                     requests.map(req => (
-                      <RideItem 
-                        key={req.request_id} 
+                      <RideItem
+                        key={req.request_id}
                         ride={{
                           request_id: req.request_id,
                           request_status: 'pending',
@@ -299,7 +294,7 @@ export default function Driver() {
                           pickup_address: req.pickup_address,
                           dropoff_address: req.dropoff_address,
                           rider_name: req.rider_name
-                        }} 
+                        }}
                         showRider
                         onClick={() => setSelectedPreview(req)}
                       />
@@ -317,11 +312,11 @@ export default function Driver() {
                 <div className="no-activity">No completed rides yet.</div>
               ) : (
                 history.map(ride => (
-                  <RideItem 
-                    key={ride.ride_id} 
-                    ride={ride} 
+                  <RideItem
+                    key={ride.ride_id}
+                    ride={ride}
                     showRider
-                    onClick={(r) => alert(`Ride #${r.ride_id} with ${r.rider_name}\nStatus: ${r.ride_status}`)} 
+                    onClick={(r) => alert(`Ride #${r.ride_id} with ${r.rider_name}\nStatus: ${r.ride_status}`)}
                   />
                 ))
               )}
@@ -330,7 +325,6 @@ export default function Driver() {
         )}
       </div>
 
-      {/* ── Map ─────────────────────────────────────────────── */}
       <div className="map-viewport">
         <RouteMap
           origin={mapOrigin}

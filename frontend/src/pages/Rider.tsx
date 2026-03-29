@@ -19,13 +19,16 @@ export default function Rider() {
   const [requests, setRequests] = useState<RideData[]>([]);
   const [statusMsg, setStatusMsg] = useState('');
   const [selectedHistoryRide, setSelectedHistoryRide] = useState<RideData | null>(null);
-  const [selfLocation, setSelfLocation] = useState<{lat: number, lng: number} | null>(null);
-  const [activeDriverLocation, setActiveDriverLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [selfLocation, setSelfLocation] = useState<{ lat: number, lng: number } | null>(null);
+  const [activeDriverLocation, setActiveDriverLocation] = useState<{ lat: number, lng: number } | null>(null);
   const [pickingMode, setPickingMode] = useState<'pickup' | 'dropoff' | null>(null);
   const [isLocationEstimated, setIsLocationEstimated] = useState(false);
   const [vehicleTypes, setVehicleTypes] = useState<any[]>([]);
   const [selectedVehicleType, setSelectedVehicleType] = useState<string>('');
+  const [shareCopied, setShareCopied] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const locationSyncRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const selfLocationRef = useRef<{ lat: number, lng: number } | null>(null);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -69,7 +72,7 @@ export default function Rider() {
     } catch (err) {
       console.error('Failed to fetch history:', err);
     }
-  }, []); 
+  }, []);
 
   const checkState = useCallback(async () => {
     try {
@@ -92,7 +95,34 @@ export default function Rider() {
     }
   }, [fetchHistory]);
 
-  // Self location tracking with IP fallback
+  useEffect(() => { selfLocationRef.current = selfLocation; }, [selfLocation]);
+
+  useEffect(() => {
+    const isActive = phase === 'pending' || phase === 'matched';
+    if (isActive) {
+      if (!locationSyncRef.current) {
+        locationSyncRef.current = setInterval(async () => {
+          const loc = selfLocationRef.current;
+          if (!loc) return;
+          try {
+            await api.post('/api/rides/rider-location', { lat: loc.lat, lng: loc.lng });
+          } catch (_) { }
+        }, 5000);
+      }
+    } else {
+      if (locationSyncRef.current) {
+        clearInterval(locationSyncRef.current);
+        locationSyncRef.current = null;
+      }
+    }
+    return () => {
+      if (locationSyncRef.current) {
+        clearInterval(locationSyncRef.current);
+        locationSyncRef.current = null;
+      }
+    };
+  }, [phase]);
+
   useEffect(() => {
     const fetchIPLocation = async () => {
       try {
@@ -123,7 +153,15 @@ export default function Rider() {
     return () => navigator.geolocation.clearWatch(watchId);
   }, []);
 
-  // Polling logic: if any request is active, keep polling
+  const handleShareLocation = () => {
+    if (!selfLocation) return;
+    const link = `https://www.google.com/maps?q=${selfLocation.lat},${selfLocation.lng}`;
+    navigator.clipboard.writeText(link).then(() => {
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 3000);
+    });
+  };
+
   useEffect(() => {
     const hasActive = requests.some(r => r.request_status === 'pending' || (r.request_status === 'accepted' && r.ride_status === 'ongoing'));
     if (hasActive || phase !== 'idle') {
@@ -168,7 +206,6 @@ export default function Rider() {
         dropoff_lng: dropoff.lng,
         vehicle_type_id: selectedVehicleType,
       });
-      // Reset for next request
       setPhase('idle');
       setPickup(null);
       setDropoff(null);
@@ -186,14 +223,13 @@ export default function Rider() {
       await api.delete('/api/rides/cancel');
       setPhase('idle');
       fetchHistory();
-    } catch (_) {}
+    } catch (_) { }
   };
 
   const running = requests.filter(r => r.request_status === 'pending' || (r.request_status === 'accepted' && r.ride_status === 'ongoing'));
   const completed = requests.filter(r => r.request_status === 'cancelled' || r.ride_status === 'completed' || r.ride_status === 'cancelled' || r.request_status === 'rejected');
 
-  // Map logic: switch coordinates based on tab and selection
-  const mapOrigin = activeTab === 'book' 
+  const mapOrigin = activeTab === 'book'
     ? (pickup ? { lat: pickup.lat, lng: pickup.lng } : null)
     : (selectedHistoryRide ? { lat: Number(selectedHistoryRide.pickup_lat), lng: Number(selectedHistoryRide.pickup_lng) } : null);
 
@@ -204,17 +240,16 @@ export default function Rider() {
   return (
     <div className="rider-container">
 
-      {/* ── Sidebar ─────────────────────────────────────────── */}
       <div className="rider-sidebar">
-        
+
         <div className="tab-header">
-          <button 
+          <button
             className={`tab-btn ${activeTab === 'book' ? 'active' : ''}`}
             onClick={() => setActiveTab('book')}
           >
             Book a Ride
           </button>
-          <button 
+          <button
             className={`tab-btn ${activeTab === 'history' ? 'active' : ''}`}
             onClick={() => { setActiveTab('history'); fetchHistory(); }}
           >
@@ -235,18 +270,18 @@ export default function Rider() {
             <div className="search-group">
               <h4 className="search-label">Pickup</h4>
               <div className="search-row-wrapper">
-                <LocationSearch 
-                  placeholder="Enter pickup location" 
-                  onSelect={setPickup} 
+                <LocationSearch
+                  placeholder="Enter pickup location"
+                  onSelect={setPickup}
                   value={pickup?.address}
                 />
                 <div className="search-addons">
-                  <button 
+                  <button
                     className={`addon-btn ${pickingMode === 'pickup' ? 'active' : ''}`}
                     onClick={() => setPickingMode(pickingMode === 'pickup' ? null : 'pickup')}
                     title="Pick on map"
                   >📍</button>
-                  <button 
+                  <button
                     className="addon-btn"
                     onClick={() => handleUseMyLocation('pickup')}
                     title="Use my location"
@@ -258,18 +293,18 @@ export default function Rider() {
             <div className="search-group">
               <h4 className="search-label">Drop-off</h4>
               <div className="search-row-wrapper">
-                <LocationSearch 
-                  placeholder="Enter destination" 
-                  onSelect={setDropoff} 
+                <LocationSearch
+                  placeholder="Enter destination"
+                  onSelect={setDropoff}
                   value={dropoff?.address}
                 />
                 <div className="search-addons">
-                  <button 
+                  <button
                     className={`addon-btn ${pickingMode === 'dropoff' ? 'active' : ''}`}
                     onClick={() => setPickingMode(pickingMode === 'dropoff' ? null : 'dropoff')}
                     title="Pick on map"
                   >📍</button>
-                  <button 
+                  <button
                     className="addon-btn"
                     onClick={() => handleUseMyLocation('dropoff')}
                     title="Use my location"
@@ -297,7 +332,7 @@ export default function Rider() {
                 </div>
                 <div className="estimate-row" style={{ marginBottom: '20px', alignItems: 'center' }}>
                   <span className="estimate-label">Vehicle Type:</span>
-                  <select 
+                  <select
                     value={selectedVehicleType}
                     onChange={(e) => setSelectedVehicleType(e.target.value)}
                     style={{ padding: '6px', borderRadius: '4px', flex: 1, marginLeft: '10px' }}
@@ -321,7 +356,7 @@ export default function Rider() {
 
             {running.length > 0 && (
               <div className="active-count-badge">
-                You have {running.length} active request{running.length > 1 ? 's' : ''}. 
+                You have {running.length} active request{running.length > 1 ? 's' : ''}.
                 <button onClick={() => setActiveTab('history')}>View All</button>
               </div>
             )}
@@ -329,7 +364,7 @@ export default function Rider() {
         ) : (
           <div className="tab-content">
             <h2 className="rider-title">My Activity</h2>
-            
+
             {selectedHistoryRide && (
               <div className="preview-card history-preview">
                 <div className="preview-header">
@@ -352,12 +387,12 @@ export default function Rider() {
               <div className="history-section">
                 <h3 className="section-title">Running</h3>
                 <div className="request-list">
-                  {running.length === 0 ? <p className="no-activity">No active requests.</p> : 
+                  {running.length === 0 ? <p className="no-activity">No active requests.</p> :
                     running.map(req => (
-                      <RideItem 
-                        key={req.request_id} 
-                        ride={req} 
-                        onClick={() => setSelectedHistoryRide(req)} 
+                      <RideItem
+                        key={req.request_id}
+                        ride={req}
+                        onClick={() => setSelectedHistoryRide(req)}
                         active={selectedHistoryRide?.request_id === req.request_id}
                       />
                     ))
@@ -368,11 +403,11 @@ export default function Rider() {
               <div className="history-section" style={{ marginTop: '24px' }}>
                 <h3 className="section-title">Completed</h3>
                 <div className="request-list">
-                  {completed.length === 0 ? <p className="no-activity">No past trips.</p> : 
+                  {completed.length === 0 ? <p className="no-activity">No past trips.</p> :
                     completed.map(req => (
-                      <RideItem 
-                        key={req.request_id} 
-                        ride={req} 
+                      <RideItem
+                        key={req.request_id}
+                        ride={req}
                         onClick={() => setSelectedHistoryRide(req)}
                         active={selectedHistoryRide?.request_id === req.request_id}
                       />
@@ -385,7 +420,6 @@ export default function Rider() {
         )}
       </div>
 
-      {/* ── Map ─────────────────────────────────────────────── */}
       <div className="map-viewport">
         <RouteMap
           origin={mapOrigin}
@@ -397,14 +431,37 @@ export default function Rider() {
         />
       </div>
 
+      {(phase === 'pending' || phase === 'matched') && selfLocation && (
+        <div style={{
+          position: 'fixed',
+          bottom: '80px',
+          right: '24px',
+          zIndex: 2000,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: '8px',
+        }}>
+          <button
+            className="share-location-btn"
+            onClick={handleShareLocation}
+            title="Copy your location link"
+          >
+            📍 Share My Location
+          </button>
+          {shareCopied && (
+            <span className="share-location-copied">✅ Link copied to clipboard!</span>
+          )}
+        </div>
+      )}
+
       {phase === 'matched' && running.find(r => r.ride_status === 'ongoing') && (
-        <Chat 
-          rideId={running.find(r => r.ride_status === 'ongoing')!.ride_id!} 
-          theirName={running.find(r => r.ride_status === 'ongoing')!.driver_name || 'Driver'} 
+        <Chat
+          rideId={running.find(r => r.ride_status === 'ongoing')!.ride_id!}
+          theirName={running.find(r => r.ride_status === 'ongoing')!.driver_name || 'Driver'}
         />
       )}
 
     </div>
   );
 }
-
