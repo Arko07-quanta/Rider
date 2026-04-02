@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { io, Socket } from 'socket.io-client';
 import api from '../../api/axios';
 import './Chat.css';
 
@@ -18,12 +19,32 @@ export default function Chat({ rideId, theirName }: { rideId: number, theirName:
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval>;
+    let socket: Socket;
+
     if (isOpen) {
       fetchMessages();
-      interval = setInterval(fetchMessages, 3000);
+      
+      socket = io('http://localhost:4000', {
+        withCredentials: true,
+      });
+
+      socket.on('connect', () => {
+        socket.emit('join_ride', rideId);
+      });
+
+      socket.on('new_message', (message: ChatMessage) => {
+        setMessages(prev => {
+          if (!prev.find(m => m.message_id === message.message_id)) {
+            return [...prev, message];
+          }
+          return prev;
+        });
+      });
     }
-    return () => clearInterval(interval);
+
+    return () => {
+      if (socket) socket.disconnect();
+    };
   }, [isOpen, rideId]);
 
   useEffect(() => {

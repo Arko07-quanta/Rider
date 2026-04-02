@@ -9,8 +9,32 @@ import chatRoutes from "./routes/chat";
 import pool from "./db";
 import bcrypt from "bcrypt";
 
+import { createServer } from "http";
+import { Server } from "socket.io";
+
 const app = express();
 const PORT = process.env.PORT || 4000;
+
+const httpServer = createServer(app);
+export const io = new Server(httpServer, {
+  cors: {
+    origin: 'http://localhost:5173',
+    credentials: true
+  }
+});
+
+io.on("connection", (socket) => {
+  console.log(`⚡ Socket connected: ${socket.id}`);
+
+  socket.on("join_ride", (rideId) => {
+    socket.join(`ride_${rideId}`);
+    console.log(`🔌 Socket ${socket.id} joined ride_${rideId}`);
+  });
+
+  socket.on("disconnect", () => {
+    console.log(`❌ Socket disconnected: ${socket.id}`);
+  });
+});
 
 app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
 app.use(cookieParser());
@@ -138,7 +162,7 @@ const initializeDatabase = async () => {
   }
 };
 
-app.listen(PORT, () => {
+httpServer.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
   initializeDatabase();
 });

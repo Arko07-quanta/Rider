@@ -1,6 +1,7 @@
 import express from "express";
 import pool from "../db";
 import { authenticateToken } from "../middleware/authMiddleware";
+import { io } from "../index";
 
 const router = express.Router();
 
@@ -51,7 +52,17 @@ router.post("/send", authenticateToken, async (req: any, res: any) => {
       [ride_id, sender_id, message_text]
     );
 
-    res.status(201).json(insertResult.rows[0]);
+    const newMessage = insertResult.rows[0];
+    
+    const senderResult = await pool.query(
+      `SELECT name FROM users WHERE user_id = $1`,
+      [sender_id]
+    );
+    newMessage.sender_name = senderResult.rows[0]?.name || "Unknown";
+
+    io.to(`ride_${ride_id}`).emit("new_message", newMessage);
+
+    res.status(201).json(newMessage);
   } catch (err: any) {
     console.error("Send message error:", err);
     res.status(500).json({ message: "Failed to send message" });
