@@ -30,7 +30,7 @@ function Login() {
       const response = await api.post("/api/auth/login", form);
       const role = response.data.user.role;
 
-      localStorage.setItem("token", response.data.token);
+      // Cookies are now handled entirely by the backend HttpOnly response
 
       if (role === "admin") navigate("/dashboard");
       else if (role === "rider") navigate("/rider");

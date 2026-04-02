@@ -1,20 +1,26 @@
 import axios from "axios";
+import Cookies from "js-cookie";
 
 const api = axios.create({
   baseURL: "http://localhost:4000",
+  withCredentials: true,
   headers: {
     "Content-Type": "application/json",
   },
 });
 
+export const logoutApi = async () => {
+  try {
+    await api.post("/api/auth/logout");
+  } catch (err) {
+    console.error(err);
+  }
+  Cookies.remove("auth_info");
+  window.location.href = "/login";
+};
+
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("token");
-    
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    
     return config;
   },
   (error) => {
@@ -26,7 +32,7 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response && (error.response.status === 401 || error.response.status === 403)) {
-      localStorage.removeItem("token");
+      Cookies.remove("auth_info");
       window.location.href = "/login";
     }
     return Promise.reject(error);

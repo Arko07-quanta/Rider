@@ -1,20 +1,21 @@
 import { useState, useEffect } from "react";
-import { NavLink, useNavigate, useLocation } from "react-router-dom";
-import { jwtDecode } from "jwt-decode";
+import { NavLink, useLocation } from "react-router-dom";
+import Cookies from "js-cookie";
+import { logoutApi } from "../api/axios";
 import "./Navbar.css";
 
 const Navbar: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState("");
-  const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (token) {
+    const authInfoStr = Cookies.get("auth_info");
+    if (authInfoStr) {
       try {
-        const decodedToken: { role: string } = jwtDecode(token);
+        const authInfo = JSON.parse(authInfoStr);
         setIsAuthenticated(true);
-        setUserRole(decodedToken.role);
+        setUserRole(authInfo.role);
       } catch (error) {
         console.error("Invalid token:", error);
         handleLogout();
@@ -26,10 +27,7 @@ const Navbar: React.FC = () => {
   }, [location.pathname]);
 
   const handleLogout = () => {
-    localStorage.removeItem("token");
-    setIsAuthenticated(false);
-    setUserRole("");
-    navigate("/login");
+    logoutApi();
   };
 
   return (

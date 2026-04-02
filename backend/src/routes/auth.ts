@@ -45,7 +45,22 @@ router.post("/signup", async (req: any, res: any) => {
     await client.query('COMMIT');
 
     const token = jwt.sign({ id: userId, role }, process.env.JWT_SECRET as string, { expiresIn: '1d' });
-    res.status(201).json({ token, user: { id: userId, role, name } });
+    
+    // Cookie options
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax" as const,
+      maxAge: 24 * 60 * 60 * 1000 // 1 day
+    };
+
+    res.cookie("token", token, cookieOptions);
+    res.cookie("auth_info", JSON.stringify({ role, exp: Date.now() + 24 * 60 * 60 * 1000 }), { 
+      ...cookieOptions, 
+      httpOnly: false // This allows frontend logic to read user state
+    });
+
+    res.status(201).json({ user: { id: userId, role, name } });
 
   } catch (err: any) {
     await client.query('ROLLBACK');
@@ -100,9 +115,22 @@ router.post("/login", async (req: any, res: any) => {
       { expiresIn: "1h" }
     );
 
+    // Cookie options
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax" as const,
+      maxAge: 60 * 60 * 1000 // 1 hour
+    };
+
+    res.cookie("token", token, cookieOptions);
+    res.cookie("auth_info", JSON.stringify({ role: user.role, exp: Date.now() + 60 * 60 * 1000 }), { 
+      ...cookieOptions, 
+      httpOnly: false 
+    });
+
     res.json({ 
       message: "Login successful", 
-      token, 
       user: { id: user.user_id, role: user.role, name: user.name } 
     });
   } catch (err: any) {
@@ -111,6 +139,12 @@ router.post("/login", async (req: any, res: any) => {
   }
 });
 
+
+router.post("/logout", (_req: any, res: any) => {
+  res.clearCookie("token");
+  res.clearCookie("auth_info");
+  res.json({ message: "Logged out successfully" });
+});
 
 router.get("/vehicle-types", async (req: any, res: any) => {
   try {

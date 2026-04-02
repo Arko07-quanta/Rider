@@ -1,18 +1,19 @@
-import { jwtDecode } from "jwt-decode";
-
-export function isTokenExpired(token: string): boolean {
-  try {
-    const decoded: any = jwtDecode(token);
-    return decoded.exp * 1000 < Date.now();
-  } catch {
-    return true;
-  }
-}
+import Cookies from "js-cookie";
 
 export function checkAuthAndRedirect() {
-  const token = localStorage.getItem("token");
-  if (!token || isTokenExpired(token)) {
-    localStorage.removeItem("token");
+  let isExpired = true;
+  try {
+    const authInfoStr = Cookies.get("auth_info");
+    if (authInfoStr) {
+      const authInfo = JSON.parse(authInfoStr);
+      if (authInfo.exp > Date.now()) {
+        isExpired = false;
+      }
+    }
+  } catch {}
+
+  if (isExpired) {
+    Cookies.remove("auth_info");
     window.location.href = "/login";
   }
 }

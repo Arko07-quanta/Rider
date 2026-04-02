@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express, { Request, Response } from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import authRoutes from "./routes/auth";
 import adminRoutes from "./routes/admin";
 import ridesRoutes from "./routes/rides";
@@ -11,7 +12,8 @@ import bcrypt from "bcrypt";
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-app.use(cors());
+app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
+app.use(cookieParser());
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);

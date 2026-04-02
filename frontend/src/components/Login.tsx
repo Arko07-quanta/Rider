@@ -16,7 +16,7 @@ function Login(){
         try{
             const response = await axios.post("/api/auth/login",{email,password});
             console.log(response.data);
-            localStorage.setItem("token",response.data.token);
+            // Cookies are handled automatically
             alert(response.data.message);
         }catch (err: any) {
             console.log("Axios error:", err);
