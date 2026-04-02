@@ -6,6 +6,7 @@ import VerificationPanel, { type PendingDriver } from "../components/admin/Verif
 import UserManagementPanel from "../components/admin/UserManagementPanel";
 import ActiveRidesPanel from "../components/admin/ActiveRidesPanel";
 import SystemLogsPanel from "../components/admin/SystemLogsPanel";
+import AnalyticsPanel from "../components/admin/AnalyticsPanel";
 
 export default function AdminDashboard() {
   const [activePanel, setActivePanel] = useState("verification");
@@ -70,6 +71,10 @@ export default function AdminDashboard() {
             className={`nav-item ${activePanel === "logs" ? "active" : ""}`}
             onClick={() => setActivePanel("logs")}
           >System Logs</button>
+          <button
+            className={`nav-item ${activePanel === "analytics" ? "active" : ""}`}
+            onClick={() => setActivePanel("analytics")}
+          >Analytics Hub</button>
         </nav>
       </aside>
 
@@ -102,6 +107,7 @@ export default function AdminDashboard() {
           {activePanel === "users" && <UserManagementPanel />}
           {activePanel === "rides" && <ActiveRidesPanel />}
           {activePanel === "logs" && <SystemLogsPanel />}
+          {activePanel === "analytics" && <AnalyticsPanel />}
         </div>
       </main>
     </div>

@@ -52,12 +52,7 @@ router.delete("/decline-driver/:id", authenticateAdmin, async (req: any, res: an
   const client = await pool.connect();
   
   try {
-    await client.query("BEGIN");
-    await client.query("DELETE FROM vehicles WHERE driver_id = $1", [id]);
-    await client.query("DELETE FROM drivers WHERE user_id = $1", [id]);
-    await client.query("DELETE FROM wallets WHERE user_id = $1", [id]);
-    await client.query("DELETE FROM users WHERE user_id = $1", [id]);
-    await client.query("COMMIT");
+    await client.query("CALL reject_driver_application($1, $2)", [id, req.user.id]);
     res.json({ message: "Driver declined and deleted" });
   } catch (err: any) {
     await client.query("ROLLBACK");
@@ -117,6 +112,59 @@ router.get("/system-logs", authenticateAdmin, async (req: any, res: any) => {
     res.json(result.rows);
   } catch (err) {
     console.error("Get system logs error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/analytics-drivers", authenticateAdmin, async (req: any, res: any) => {
+  try {
+    const result = await pool.query(`
+      SELECT u.name, d.license_number, get_driver_total_earnings(u.user_id) as total_earnings
+      FROM users u
+      JOIN drivers d ON u.user_id = d.user_id
+      ORDER BY total_earnings DESC
+      LIMIT 5
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Analytics driver error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/analytics-vehicles", authenticateAdmin, async (req: any, res: any) => {
+  try {
+    const result = await pool.query(`
+      SELECT vt.type_name, COUNT(r.ride_id) as total_rides
+      FROM vehicle_types vt
+      JOIN ride_requests rq ON vt.vehicle_type_id = rq.vehicle_type_id
+      JOIN rides r ON rq.request_id = r.request_id
+      WHERE r.status = 'completed'
+      GROUP BY vt.type_name
+      ORDER BY total_rides DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Analytics vehicle error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/analytics-cashflow", authenticateAdmin, async (req: any, res: any) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+          DATE(t.timestamp) as transaction_date,
+          SUM(CASE WHEN t.type = 'credit' THEN t.amount ELSE 0 END) as total_credits,
+          SUM(CASE WHEN t.type = 'debit' THEN t.amount ELSE 0 END) as total_debits
+      FROM transactions t
+      GROUP BY DATE(t.timestamp)
+      ORDER BY transaction_date DESC
+      LIMIT 7
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Analytics cashflow error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
