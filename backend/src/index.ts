@@ -6,6 +6,7 @@ import authRoutes from "./routes/auth";
 import adminRoutes from "./routes/admin";
 import ridesRoutes from "./routes/rides";
 import chatRoutes from "./routes/chat";
+import walletRoutes from "./routes/wallet";
 import pool from "./db";
 import bcrypt from "bcrypt";
 
@@ -31,6 +32,11 @@ io.on("connection", (socket) => {
     console.log(`🔌 Socket ${socket.id} joined ride_${rideId}`);
   });
 
+  socket.on("join_request", (requestId) => {
+    socket.join(`request_${requestId}`);
+    console.log(`🔌 Socket ${socket.id} joined request_${requestId}`);
+  });
+
   socket.on("disconnect", () => {
     console.log(`❌ Socket disconnected: ${socket.id}`);
   });
@@ -44,6 +50,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/rides", ridesRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/wallet", walletRoutes);
 
 app.get("/", (_req: Request, res: Response) => res.send("Hello World 💖"));
 

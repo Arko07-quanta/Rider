@@ -1,6 +1,7 @@
 import express from "express";
 import pool from "../db";
 import { authenticateToken } from "../middleware/authMiddleware";
+import { io } from "../index";
 
 const router = express.Router();
 
@@ -15,7 +16,7 @@ async function insertLocation(client: any, lat: number, lng: number, address: st
 router.get("/vehicle-types", authenticateToken, async (req: any, res: any) => {
   try {
     const result = await pool.query(
-      `SELECT vehicle_type_id, type_name, max_passengers, base_fare, minimum_fare FROM vehicle_types ORDER BY vehicle_type_id ASC`
+      `SELECT vehicle_type_id, type_name, max_passengers, base_fare, minimum_fare, fare_per_km FROM vehicle_types ORDER BY vehicle_type_id ASC`
     );
     res.json(result.rows);
   } catch (err: any) {
@@ -25,7 +26,7 @@ router.get("/vehicle-types", authenticateToken, async (req: any, res: any) => {
 });
 
 router.post("/request", authenticateToken, async (req: any, res: any) => {
-  const { pickup_address, dropoff_address, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, vehicle_type_id } = req.body;
+  const { pickup_address, dropoff_address, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, vehicle_type_id, distance_km } = req.body;
   if (!vehicle_type_id) {
     return res.status(400).json({ message: "vehicle_type_id is required" });
   }
@@ -36,20 +37,19 @@ router.post("/request", authenticateToken, async (req: any, res: any) => {
     await client.query("BEGIN");
     console.log(rider_id);
 
-    const existingReqs = await client.query(
-      `SELECT rq.request_id FROM ride_requests rq WHERE rq.rider_id = $1 AND rq.status = 'pending'`,
-      [rider_id]
-    );
-    if (existingReqs.rows.length > 0) {
-      const ids = existingReqs.rows.map((r: any) => r.request_id);
-      await client.query(
-        `UPDATE ride_requests SET status = 'cancelled' WHERE request_id = ANY($1::bigint[])`,
-        [ids]
-      );
-    }
+    // Removed block that cancelled existing pending requests to allow multiple concurrent requests
 
     const pickupLocId = await insertLocation(client, pickup_lat, pickup_lng, pickup_address);
     const dropoffLocId = await insertLocation(client, dropoff_lat, dropoff_lng, dropoff_address);
+
+    let fare = 0;
+    const vType = await client.query("SELECT * FROM vehicle_types WHERE vehicle_type_id = $1", [vehicle_type_id]);
+    if (vType.rows.length > 0) {
+      const v = vType.rows[0];
+      const dist = distance_km || 0;
+      let calculatedFare = Number(v.base_fare) + (dist * Number(v.fare_per_km));
+      fare = Math.max(calculatedFare, Number(v.minimum_fare));
+    }
 
     const reqResult = await client.query(
       `INSERT INTO ride_requests (rider_id, vehicle_type_id, status) VALUES ($1, $2, 'pending') RETURNING request_id`,
@@ -58,9 +58,9 @@ router.post("/request", authenticateToken, async (req: any, res: any) => {
     const request_id = reqResult.rows[0].request_id;
 
     await client.query(
-      `INSERT INTO rides (request_id, driver_id, pickup_location_id, dropoff_location_id, status)
-       VALUES ($1, NULL, $2, $3, 'ongoing')`,
-      [request_id, pickupLocId, dropoffLocId]
+      `INSERT INTO rides (request_id, driver_id, pickup_location_id, dropoff_location_id, status, distance, fare)
+       VALUES ($1, NULL, $2, $3, 'ongoing', $4, $5)`,
+      [request_id, pickupLocId, dropoffLocId, distance_km || 0, fare]
     );
 
     await client.query("COMMIT");
@@ -152,12 +152,13 @@ router.get("/my-request", authenticateToken, async (req: any, res: any) => {
   }
 });
 
-router.delete("/cancel", authenticateToken, async (req: any, res: any) => {
+router.delete("/cancel/:requestId", authenticateToken, async (req: any, res: any) => {
+  const { requestId } = req.params;
   const rider_id = req.user.id;
   try {
     const reqUpdate = await pool.query(
-      "UPDATE ride_requests SET status = 'cancelled' WHERE rider_id = $1 AND status = 'pending' RETURNING request_id",
-      [rider_id]
+      "UPDATE ride_requests SET status = 'cancelled' WHERE request_id = $1 AND rider_id = $2 AND status = 'pending' RETURNING request_id",
+      [requestId, rider_id]
     );
 
     if (reqUpdate.rows.length === 0) {
@@ -266,6 +267,10 @@ router.post("/accept/:requestId", authenticateToken, async (req: any, res: any) 
     );
 
     await client.query("COMMIT");
+    
+    // Notify the rider immediately that the request is accepted
+    io.to(`request_${requestId}`).emit("ride_status_update", { status: 'accepted' });
+    
     res.json({ ride_id: rideResult.rows[0]?.ride_id, message: "Ride accepted!" });
   } catch (err: any) {
     await client.query("ROLLBACK");
@@ -304,20 +309,74 @@ router.get("/my-ride", authenticateToken, async (req: any, res: any) => {
 router.post("/complete/:rideId", authenticateToken, async (req: any, res: any) => {
   const { rideId } = req.params;
   const driver_id = req.user.id;
+  const client = await pool.connect();
+  
   try {
-    const result = await pool.query(
-      `UPDATE rides SET status = 'completed', end_time = NOW(), updated_at = NOW()
-       WHERE ride_id = $1 AND driver_id = $2 AND status = 'ongoing'
-       RETURNING ride_id`,
+    await client.query("BEGIN");
+
+    const rideRes = await client.query(
+      `SELECT r.status, r.fare, rq.rider_id 
+       FROM rides r 
+       JOIN ride_requests rq ON r.request_id = rq.request_id
+       WHERE r.ride_id = $1 AND r.driver_id = $2 FOR UPDATE`,
       [rideId, driver_id]
     );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: "Active ride not found" });
+
+    if (rideRes.rows.length === 0) {
+       await client.query("ROLLBACK");
+       return res.status(404).json({ message: "Active ride not found" });
     }
+    
+    if (rideRes.rows[0].status !== 'ongoing') {
+       await client.query("ROLLBACK");
+       return res.status(400).json({ message: "Ride is not ongoing" });
+    }
+
+    const { fare, rider_id } = rideRes.rows[0];
+
+    await client.query(
+      `UPDATE rides SET status = 'completed', end_time = NOW(), updated_at = NOW()
+       WHERE ride_id = $1`,
+      [rideId]
+    );
+
+    if (fare && Number(fare) > 0) {
+       let riderWallet = await client.query(`SELECT wallet_id FROM wallets WHERE user_id = $1 FOR UPDATE`, [rider_id]);
+       if (riderWallet.rows.length === 0) {
+         riderWallet = await client.query(`INSERT INTO wallets (user_id, balance) VALUES ($1, 0.00) RETURNING wallet_id`, [rider_id]);
+       }
+       const r_wallet_id = riderWallet.rows[0].wallet_id;
+
+       let driverWallet = await client.query(`SELECT wallet_id FROM wallets WHERE user_id = $1 FOR UPDATE`, [driver_id]);
+       if (driverWallet.rows.length === 0) {
+         driverWallet = await client.query(`INSERT INTO wallets (user_id, balance) VALUES ($1, 0.00) RETURNING wallet_id`, [driver_id]);
+       }
+       const d_wallet_id = driverWallet.rows[0].wallet_id;
+
+       await client.query(`UPDATE wallets SET balance = balance - $1, updated_at = NOW() WHERE wallet_id = $2`, [fare, r_wallet_id]);
+       await client.query(
+         `INSERT INTO transactions (wallet_id, ride_id, type, amount, status, payment_method) VALUES ($1, $2, 'debit', $3, 'completed', 'Wallet')`,
+         [r_wallet_id, rideId, fare]
+       );
+
+       await client.query(`UPDATE wallets SET balance = balance + $1, updated_at = NOW() WHERE wallet_id = $2`, [fare, d_wallet_id]);
+       await client.query(
+         `INSERT INTO transactions (wallet_id, ride_id, type, amount, status, payment_method) VALUES ($1, $2, 'credit', $3, 'completed', 'Wallet')`,
+         [d_wallet_id, rideId, fare]
+       );
+    }
+
+    await client.query("COMMIT");
+    
+    io.to(`ride_${rideId}`).emit("ride_status_update", { status: 'completed' });
+    
     res.json({ message: "Ride completed!" });
   } catch (err: any) {
+    await client.query("ROLLBACK");
     console.error("Complete ride error:", err);
     res.status(500).json({ message: err.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -354,6 +413,10 @@ router.post("/driver-cancel/:rideId", authenticateToken, async (req: any, res: a
     );
 
     await client.query("COMMIT");
+    
+    // Notify clients that the ride is cancelled
+    io.to(`ride_${rideId}`).emit("ride_status_update", { status: 'cancelled' });
+    
     res.json({ message: "Ride cancelled by driver" });
   } catch (err: any) {
     await client.query("ROLLBACK");

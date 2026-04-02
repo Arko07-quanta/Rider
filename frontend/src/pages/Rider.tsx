@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { io, Socket } from 'socket.io-client';
 import './Rider.css';
 import LocationSearch from '../components/map/LocationSearch';
 import type { LocationData } from '../components/map/LocationSearch';
@@ -9,13 +10,24 @@ import api from '../api/axios';
 
 type Phase = 'idle' | 'pending' | 'matched';
 
+interface Transaction {
+  transaction_id: string;
+  type: 'credit' | 'debit';
+  amount: number;
+  status: string;
+  timestamp: string;
+  payment_method: string;
+}
+
 export default function Rider() {
-  const [activeTab, setActiveTab] = useState<'book' | 'history'>('book');
+  const [activeTab, setActiveTab] = useState<'book' | 'history' | 'wallet'>('book');
+  const [wallet, setWallet] = useState<{balance: number, currency: string, transactions: Transaction[]} | null>(null);
+  const [depositAmount, setDepositAmount] = useState('');
   const [pickup, setPickup] = useState<LocationData | null>(null);
   const [dropoff, setDropoff] = useState<LocationData | null>(null);
   const [distance, setDistance] = useState('');
   const [duration, setDuration] = useState('');
-  const [phase, setPhase] = useState<Phase>('idle');
+  const [distanceKm, setDistanceKm] = useState(0);
   const [requests, setRequests] = useState<RideData[]>([]);
   const [statusMsg, setStatusMsg] = useState('');
   const [selectedHistoryRide, setSelectedHistoryRide] = useState<RideData | null>(null);
@@ -74,19 +86,34 @@ export default function Rider() {
     }
   }, []);
 
+  const running = requests.filter(r => r.request_status === 'pending' || (r.request_status === 'accepted' && r.ride_status === 'ongoing'));
+  const completed = requests.filter(r => r.request_status === 'cancelled' || r.ride_status === 'completed' || r.ride_status === 'cancelled' || r.request_status === 'rejected');
+  const phase: Phase = running.length > 0 ? (running.some(r => r.ride_status === 'ongoing') ? 'matched' : 'pending') : 'idle';
+
+  useEffect(() => {
+    if (selectedHistoryRide) {
+      const updatedMatch = requests.find(r => r.request_id === selectedHistoryRide.request_id);
+      if (updatedMatch) {
+         if (selectedHistoryRide.ride_status === 'ongoing' && (updatedMatch.ride_status === 'completed' || updatedMatch.ride_status === 'cancelled')) {
+             setSelectedHistoryRide(null); 
+         } else if (
+           updatedMatch.ride_status !== selectedHistoryRide.ride_status || 
+           updatedMatch.request_status !== selectedHistoryRide.request_status
+         ) {
+           setSelectedHistoryRide(updatedMatch);
+         }
+      }
+    }
+  }, [requests, selectedHistoryRide]);
+
   const checkState = useCallback(async () => {
     try {
       const { data } = await api.get('/api/rides/my-request');
       if (data.phase === 'matched') {
-        setPhase('matched');
         if (data.ride.driver_lat && data.ride.driver_lng) {
           setActiveDriverLocation({ lat: Number(data.ride.driver_lat), lng: Number(data.ride.driver_lng) });
         }
-      } else if (data.phase === 'pending') {
-        setPhase('pending');
-        setActiveDriverLocation(null);
       } else {
-        setPhase('idle');
         setActiveDriverLocation(null);
       }
       fetchHistory();
@@ -96,6 +123,28 @@ export default function Rider() {
   }, [fetchHistory]);
 
   useEffect(() => { selfLocationRef.current = selfLocation; }, [selfLocation]);
+
+  useEffect(() => {
+    let socket: Socket;
+    socket = io('http://localhost:4000', { withCredentials: true });
+    
+    socket.on('connect', () => {
+      requests.forEach(req => {
+        socket.emit("join_request", req.request_id);
+        if (req.ride_id) {
+          socket.emit("join_ride", req.ride_id);
+        }
+      });
+    });
+
+    socket.on("ride_status_update", () => {
+      fetchHistory();
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [requests, fetchHistory]);
 
   useEffect(() => {
     const isActive = phase === 'pending' || phase === 'matched';
@@ -122,6 +171,27 @@ export default function Rider() {
       }
     };
   }, [phase]);
+
+  const fetchWallet = useCallback(async () => {
+    try {
+      const { data } = await api.get('/api/wallet');
+      setWallet(data);
+    } catch (err) {
+      console.error('Failed to fetch wallet:', err);
+    }
+  }, []);
+
+  const handleDeposit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!depositAmount || isNaN(Number(depositAmount))) return;
+    try {
+      await api.post('/api/wallet/deposit', { amount: Number(depositAmount) });
+      setDepositAmount('');
+      fetchWallet();
+    } catch (err) {
+      console.error('Deposit failed:', err);
+    }
+  };
 
   useEffect(() => {
     const fetchIPLocation = async () => {
@@ -176,6 +246,7 @@ export default function Rider() {
 
   useEffect(() => {
     fetchHistory();
+    fetchWallet();
     const fetchVehicles = async () => {
       try {
         const { data } = await api.get('/api/rides/vehicle-types');
@@ -188,9 +259,10 @@ export default function Rider() {
     fetchVehicles();
   }, [fetchHistory]);
 
-  const handleRouteCalculated = (dist: string, dur: string) => {
+  const handleRouteCalculated = (dist: string, dur: string, distVal: number) => {
     setDistance(dist);
     setDuration(dur);
+    setDistanceKm(distVal / 1000);
   };
 
   const handleRequestRide = async () => {
@@ -205,8 +277,8 @@ export default function Rider() {
         dropoff_lat: dropoff.lat,
         dropoff_lng: dropoff.lng,
         vehicle_type_id: selectedVehicleType,
+        distance_km: distanceKm
       });
-      setPhase('idle');
       setPickup(null);
       setDropoff(null);
       setDistance('');
@@ -218,16 +290,12 @@ export default function Rider() {
     }
   };
 
-  const handleCancel = async () => {
+  const handleCancel = async (requestId: number) => {
     try {
-      await api.delete('/api/rides/cancel');
-      setPhase('idle');
+      await api.delete(`/api/rides/cancel/${requestId}`);
       fetchHistory();
     } catch (_) { }
   };
-
-  const running = requests.filter(r => r.request_status === 'pending' || (r.request_status === 'accepted' && r.ride_status === 'ongoing'));
-  const completed = requests.filter(r => r.request_status === 'cancelled' || r.ride_status === 'completed' || r.ride_status === 'cancelled' || r.request_status === 'rejected');
 
   const mapOrigin = activeTab === 'book'
     ? (pickup ? { lat: pickup.lat, lng: pickup.lng } : null)
@@ -255,9 +323,60 @@ export default function Rider() {
           >
             My Activity
           </button>
+          <button
+            className={`tab-btn ${activeTab === 'wallet' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('wallet'); fetchWallet(); }}
+          >
+            Wallet
+          </button>
         </div>
 
-        {activeTab === 'book' ? (
+        {activeTab === 'wallet' ? (
+          <div className="tab-content">
+            <h2 className="rider-title">My Wallet</h2>
+            {wallet && (
+              <div className="wallet-card" style={{ padding: '20px', background: '#f5f5f5', borderRadius: '8px', marginBottom: '20px', border: '1px solid #ddd' }}>
+                <h3>Balance: {wallet.currency === 'USD' ? '$' : wallet.currency}{Number(wallet.balance).toFixed(2)}</h3>
+              </div>
+            )}
+            
+            <form onSubmit={handleDeposit} className="deposit-form" style={{ display: 'flex', gap: '10px', marginBottom: '24px' }}>
+              <input 
+                type="number" step="0.01" min="1" 
+                placeholder="Amount to deposit" 
+                value={depositAmount} 
+                onChange={e => setDepositAmount(e.target.value)} 
+                style={{flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc'}} 
+              />
+              <button 
+                type="submit" 
+                className="confirm-btn" 
+                style={{width: 'auto', margin: 0, padding: '8px 16px', flexShrink: 0}}
+              >
+                Add Funds
+              </button>
+            </form>
+
+            <div className="history-section">
+               <h3 className="section-title">Recent Transactions</h3>
+               {!wallet || wallet.transactions.length === 0 ? <p className="no-activity">No transactions yet.</p> : (
+                 <div className="transaction-list" style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+                   {wallet.transactions.map(tx => (
+                     <div key={tx.transaction_id} className="tx-item" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: 'white', border: '1px solid #ddd', borderRadius: '4px'}}>
+                        <div>
+                          <strong style={{ display: 'block', marginBottom: '4px' }}>{tx.type === 'credit' ? '🟢 Funds Added' : '🔴 Ride Payment'}</strong>
+                          <div style={{fontSize: '0.85em', color: '#666'}}>{new Date(tx.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</div>
+                        </div>
+                        <div style={{fontWeight: 'bold', fontSize: '1.1em', color: tx.type === 'credit' ? '#2e7d32' : '#d32f2f'}}>
+                          {tx.type === 'credit' ? '+' : '-'}${Number(tx.amount).toFixed(2)}
+                        </div>
+                     </div>
+                   ))}
+                 </div>
+               )}
+            </div>
+          </div>
+        ) : activeTab === 'book' ? (
           <div className="tab-content">
             <h2 className="rider-title">Where to?</h2>
 
@@ -330,7 +449,7 @@ export default function Rider() {
                   <span className="estimate-label">Duration:</span>
                   <strong className="estimate-value">{duration}</strong>
                 </div>
-                <div className="estimate-row" style={{ marginBottom: '20px', alignItems: 'center' }}>
+                <div className="estimate-row" style={{ marginBottom: '10px', alignItems: 'center' }}>
                   <span className="estimate-label">Vehicle Type:</span>
                   <select
                     value={selectedVehicleType}
@@ -344,6 +463,19 @@ export default function Rider() {
                     ))}
                   </select>
                 </div>
+                
+                {selectedVehicleType && distanceKm > 0 && vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)) && (
+                  <div className="estimate-row" style={{ marginBottom: '20px', padding: '10px', background: '#e3f2fd', borderRadius: '6px' }}>
+                    <span className="estimate-label" style={{ color: '#1565c0', fontWeight: 'bold' }}>Estimated Fare:</span>
+                    <strong className="estimate-value" style={{ color: '#1565c0', fontSize: '1.2em' }}>
+                      ${Math.max(
+                        Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).minimum_fare),
+                        Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).base_fare) + (distanceKm * Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).fare_per_km))
+                      ).toFixed(2)}
+                    </strong>
+                  </div>
+                )}
+
                 {statusMsg && <p className="error-msg">{statusMsg}</p>}
                 <button
                   onClick={handleRequestRide}
@@ -377,7 +509,7 @@ export default function Rider() {
                     {selectedHistoryRide.driver_name && <span>Driver: {selectedHistoryRide.driver_name}</span>}
                   </div>
                   {selectedHistoryRide.request_status === 'pending' && (
-                    <button className="inline-cancel-btn" onClick={handleCancel}>Cancel This Request</button>
+                    <button className="inline-cancel-btn" onClick={() => handleCancel(selectedHistoryRide.request_id)}>Cancel This Request</button>
                   )}
                 </div>
               </div>
@@ -455,10 +587,10 @@ export default function Rider() {
         </div>
       )}
 
-      {phase === 'matched' && running.find(r => r.ride_status === 'ongoing') && (
+      {selectedHistoryRide && selectedHistoryRide.request_status === 'accepted' && selectedHistoryRide.ride_status === 'ongoing' && (
         <Chat
-          rideId={running.find(r => r.ride_status === 'ongoing')!.ride_id!}
-          theirName={running.find(r => r.ride_status === 'ongoing')!.driver_name || 'Driver'}
+          rideId={selectedHistoryRide.ride_id!}
+          theirName={selectedHistoryRide.driver_name || 'Driver'}
         />
       )}
 

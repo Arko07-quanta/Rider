@@ -19,6 +19,15 @@ interface PendingRequest {
   created_at: string;
 }
 
+interface Transaction {
+  transaction_id: string;
+  type: 'credit' | 'debit';
+  amount: number;
+  status: string;
+  timestamp: string;
+  payment_method: string;
+}
+
 interface ActiveRide {
   ride_id: number;
   rider_name: string;
@@ -32,11 +41,12 @@ interface ActiveRide {
 }
 
 export default function Driver() {
-  const [activeTab, setActiveTab] = useState<'find' | 'history'>('find');
+  const [activeTab, setActiveTab] = useState<'find' | 'history' | 'earnings'>('find');
   const [phase, setPhase] = useState<Phase>('searching');
   const [requests, setRequests] = useState<PendingRequest[]>([]);
   const [activeRide, setActiveRide] = useState<ActiveRide | null>(null);
   const [history, setHistory] = useState<RideData[]>([]);
+  const [wallet, setWallet] = useState<{balance: number, currency: string, transactions: Transaction[]} | null>(null);
   const [selectedPreview, setSelectedPreview] = useState<PendingRequest | null>(null);
   const [accepting, setAccepting] = useState<number | null>(null);
   const [selfLocation, setSelfLocation] = useState<{lat: number, lng: number} | null>(null);
@@ -81,14 +91,24 @@ export default function Driver() {
     }
   }, [stopPolling]);
 
+  const fetchWallet = useCallback(async () => {
+    try {
+      const { data } = await api.get('/api/wallet');
+      setWallet(data);
+    } catch (err) {
+      console.error('Failed to fetch wallet:', err);
+    }
+  }, []);
+
   useEffect(() => {
     pollActiveRide().then(() => {
       pollRef.current = setInterval(pollPendingRequests, 4000);
       pollPendingRequests();
     });
     fetchHistory();
+    fetchWallet();
     return () => stopPolling();
-  }, [pollActiveRide, pollPendingRequests, stopPolling, fetchHistory]);
+  }, [pollActiveRide, pollPendingRequests, stopPolling, fetchHistory, fetchWallet]);
 
   useEffect(() => {
     const fetchIPLocation = async () => {
@@ -209,9 +229,44 @@ export default function Driver() {
           >
             My Activity
           </button>
+          <button
+            className={`tab-btn ${activeTab === 'earnings' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('earnings'); fetchWallet(); }}
+          >
+            Earnings
+          </button>
         </div>
 
-        {activeTab === 'find' ? (
+        {activeTab === 'earnings' ? (
+          <div className="tab-content">
+            <h2 className="driver-title">My Earnings</h2>
+            {wallet && (
+              <div className="earnings-card" style={{ padding: '20px', background: '#e8f5e9', borderRadius: '8px', marginBottom: '20px', border: '1px solid #c8e6c9', textAlign: 'center' }}>
+                <div style={{fontSize: '0.9em', color: '#2e7d32', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px'}}>Total Balance</div>
+                <h3 style={{margin: 0, fontSize: '2.5em', color: '#1b5e20'}}>{wallet.currency === 'USD' ? '$' : wallet.currency}{Number(wallet.balance).toFixed(2)}</h3>
+              </div>
+            )}
+            
+            <div className="history-section">
+               <h3 className="section-title">Recent Payouts</h3>
+               {!wallet || wallet.transactions.length === 0 ? <p className="no-activity">No earnings yet. Complete rides to earn!</p> : (
+                 <div className="transaction-list" style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+                   {wallet.transactions.map(tx => (
+                     <div key={tx.transaction_id} className="tx-item" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: 'white', border: '1px solid #ddd', borderRadius: '4px'}}>
+                        <div>
+                          <strong style={{ display: 'block', marginBottom: '4px' }}>{tx.type === 'credit' ? '🟢 Ride Payment' : '🔴 Deduction'}</strong>
+                          <div style={{fontSize: '0.85em', color: '#666'}}>{new Date(tx.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</div>
+                        </div>
+                        <div style={{fontWeight: 'bold', fontSize: '1.1em', color: tx.type === 'credit' ? '#2e7d32' : '#d32f2f'}}>
+                          {tx.type === 'credit' ? '+' : '-'}${Number(tx.amount).toFixed(2)}
+                        </div>
+                     </div>
+                   ))}
+                 </div>
+               )}
+            </div>
+          </div>
+        ) : activeTab === 'find' ? (
           <div className="tab-content">
             {phase === 'active' && activeRide ? (
               <div className="active-ride-card">

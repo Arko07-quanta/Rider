@@ -43,7 +43,7 @@ router.post("/send", authenticateToken, async (req: any, res: any) => {
     );
 
     if (rideCheck.rows.length === 0) {
-      return res.status(403).json({ message: "Not authorized to send messages for this active ride" });
+      return res.status(400).json({ message: "Not authorized to send messages for this active ride, or ride is ended." });
     }
 
     const insertResult = await pool.query(
