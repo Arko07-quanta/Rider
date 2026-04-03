@@ -238,13 +238,15 @@ export default function Driver() {
                 <div className="active-ride-actions">
                   <button
                     onClick={handleComplete}
-                    className="complete-btn"
+                    className="btn-primary"
+                    style={{ width: '100%', marginBottom: '12px' }}
                   >
                     ✅ Complete Ride
                   </button>
                   <button
                     onClick={handleCancelRide}
-                    className="cancel-ride-btn"
+                    className="btn-secondary"
+                    style={{ width: '100%', color: '#ef4444', borderColor: '#ef4444' }}
                   >
                     ✖ Cancel Ride
                   </button>
@@ -266,7 +268,8 @@ export default function Driver() {
                     <div className="preview-body">
                       <p><strong>Rider:</strong> {selectedPreview.rider_name}</p>
                       <button
-                        className="accept-btn full-width"
+                        className="btn-primary"
+                        style={{ width: '100%', marginTop: '12px' }}
                         onClick={() => handleAccept(selectedPreview.request_id)}
                         disabled={accepting === selectedPreview.request_id}
                       >

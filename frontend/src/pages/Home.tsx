@@ -9,15 +9,6 @@ function Home() {
 
   return (
     <div className="home-container">
-      {/* ── Navigation ── */}
-      <nav className="home-nav">
-        <div className="logo">RIDER.IO</div>
-        <div className="nav-links">
-          <button className="nav-btn login" onClick={() => navigate('/login')}>Log In</button>
-          <button className="nav-btn signup" onClick={() => navigate('/signup')}>Sign Up</button>
-        </div>
-      </nav>
-
       {/* ── Hero Section ── */}
       <header className="home-hero">
         <div className="hero-text">
@@ -26,11 +17,11 @@ function Home() {
             Experience the next generation of ride-sharing. Fast, reliable, and designed for your comfort. Whether you're commuting or road-tripping, we've got you covered.
           </p>
           <div className="hero-actions">
-            <button className="hero-btn rider" onClick={() => navigate('/rider')}>
-              <span>🚗</span> Get a Ride
+            <button className="btn-primary" onClick={() => navigate('/rider')}>
+              Get a Ride
             </button>
-            <button className="hero-btn driver" onClick={() => navigate('/driver')}>
-              <span>🤝</span> Drive with Us
+            <button className="btn-secondary" onClick={() => navigate('/driver')}>
+              Become a Driver
             </button>
           </div>
         </div>

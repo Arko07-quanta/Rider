@@ -153,7 +153,7 @@ export default function RouteMap({ origin, destination, userLocation, driverLoca
         )}
 
         {routeCoordinates.length > 0 && (
-          <Polyline positions={routeCoordinates} color="#1890ff" weight={5} />
+          <Polyline positions={routeCoordinates} color="#22C55E" weight={5} opacity={0.8} />
         )}
       </MapContainer>
     </div>

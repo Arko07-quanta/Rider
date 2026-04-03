@@ -1,19 +1,25 @@
 .ride-item-card {
-  padding: 16px;
-  background-color: #fff;
-  border: 1px solid #eee;
-  border-radius: 12px;
+  padding: 20px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: var(--transition);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
 .ride-item-card:hover {
-  border-color: #1890ff;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-  transform: translateY(-2px);
+  border-color: var(--color-primary);
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+}
+
+.ride-item-card.active {
+  border-color: var(--color-primary);
+  background-color: var(--bg-secondary);
+  box-shadow: 0 0 20px rgba(34, 197, 94, 0.1);
 }
 
 .ride-header {
@@ -23,35 +29,37 @@
 }
 
 .status-badge {
-  padding: 4px 12px;
+  padding: 6px 12px;
   border-radius: 20px;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 10px;
+  font-weight: 800;
   text-transform: uppercase;
-  background-color: #f0f0f0;
-  color: #888;
+  letter-spacing: 1px;
+  background-color: var(--bg-secondary);
+  color: var(--text-secondary);
 }
 
-.status-badge.pending { background-color: #fffbe6; color: #d4b106; }
-.status-badge.ongoing { background-color: #e6f7ff; color: #1890ff; }
-.status-badge.completed { background-color: #f6ffed; color: #52c41a; }
-.status-badge.cancelled { background-color: #fff1f0; color: #f5222d; }
+.status-badge.pending { background-color: rgba(250, 204, 21, 0.1); color: #facc15; }
+.status-badge.ongoing { background-color: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+.status-badge.completed { background-color: rgba(34, 197, 94, 0.1); color: var(--color-primary); }
+.status-badge.cancelled { background-color: rgba(239, 68, 68, 0.1); color: #ef4444; }
 
 .ride-date {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--text-muted);
+  font-weight: 600;
 }
 
 .ride-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
 .address-line {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .dot {
@@ -61,32 +69,32 @@
   flex-shrink: 0;
 }
 
-.dot.pickup { background-color: #1890ff; }
-.dot.dropoff { background-color: #ff4d4f; }
+.dot.pickup { background-color: var(--color-primary); box-shadow: 0 0 10px var(--color-primary); }
+.dot.dropoff { background-color: #ef4444; box-shadow: 0 0 10px #ef4444; }
 
 .address-text {
   font-size: 14px;
-  color: #334155;
+  color: var(--text-main);
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .ride-footer {
-  border-top: 1px solid #f1f5f9;
-  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+  padding-top: 12px;
   font-size: 13px;
-  color: #64748b;
+  color: var(--text-secondary);
 }
 
 .person-info {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
 }
 
-.ride-item-card.active {
-  border-color: #1890ff;
-  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.15);
-  background-color: #f0f7ff;
+.person-info strong {
+  color: var(--text-main);
+  font-weight: 700;
 }

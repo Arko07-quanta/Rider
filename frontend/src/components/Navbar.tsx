@@ -32,41 +32,46 @@ const Navbar: React.FC = () => {
 
   return (
     <nav className="navbar">
-      <NavLink to="/" className="navbar-brand">
-        RideShare
-      </NavLink>
-      <div className="navbar-links">
-        {isAuthenticated ? (
-          <>
-            {userRole === "admin" && (
-              <NavLink to="/dashboard" className="nav-link">
-                Dashboard
+      <div className="navbar-container">
+        <NavLink to="/" className="navbar-brand">
+          RIDER.IO
+        </NavLink>
+        
+        <div className="navbar-links">
+          <NavLink to="/rider" className="nav-link">
+            Ride
+          </NavLink>
+          <NavLink to="/driver" className="nav-link">
+            Drive
+          </NavLink>
+          <NavLink to="#" className="nav-link">
+            Business
+          </NavLink>
+        </div>
+
+        <div className="navbar-actions">
+          {isAuthenticated ? (
+            <>
+              {userRole === "admin" && (
+                <NavLink to="/dashboard" className="nav-link">
+                  Dashboard
+                </NavLink>
+              )}
+              <button onClick={handleLogout} className="btn-secondary">
+                Logout
+              </button>
+            </>
+          ) : (
+            <>
+              <NavLink to="/login" className="btn-secondary">
+                Login
               </NavLink>
-            )}
-            {userRole === "rider" && (
-              <NavLink to="/rider" className="nav-link">
-                Rider
+              <NavLink to="/signup" className="btn-primary">
+                Signup
               </NavLink>
-            )}
-            {userRole === "driver" && (
-              <NavLink to="/driver" className="nav-link">
-                Driver
-              </NavLink>
-            )}
-            <button onClick={handleLogout} className="nav-button">
-              Logout
-            </button>
-          </>
-        ) : (
-          <>
-            <NavLink to="/login" className="nav-link">
-              Login
-            </NavLink>
-            <NavLink to="/signup" className="nav-link">
-              Signup
-            </NavLink>
-          </>
-        )}
+            </>
+          )}
+        </div>
       </div>
     </nav>
   );
