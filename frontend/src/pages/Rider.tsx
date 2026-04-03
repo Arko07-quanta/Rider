@@ -335,39 +335,50 @@ export default function Rider() {
           <div className="tab-content">
             <h2 className="rider-title">My Wallet</h2>
             {wallet && (
-              <div className="wallet-card" style={{ padding: '20px', background: '#f5f5f5', borderRadius: '8px', marginBottom: '20px', border: '1px solid #ddd' }}>
-                <h3>Balance: {wallet.currency === 'USD' ? '$' : wallet.currency}{Number(wallet.balance).toFixed(2)}</h3>
+              <div className="wallet-card">
+                <div className="wallet-balance-label">Current Balance</div>
+                <h3 className="wallet-balance-value">
+                  {wallet.currency === 'USD' ? '$' : wallet.currency}
+                  {Number(wallet.balance).toFixed(2)}
+                </h3>
               </div>
             )}
             
-            <form onSubmit={handleDeposit} className="deposit-form" style={{ display: 'flex', gap: '10px', marginBottom: '24px' }}>
+            <form onSubmit={handleDeposit} className="deposit-form">
               <input 
-                type="number" step="0.01" min="1" 
+                type="number" 
+                step="0.01" 
+                min="1" 
                 placeholder="Amount to deposit" 
                 value={depositAmount} 
                 onChange={e => setDepositAmount(e.target.value)} 
-                style={{flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc'}} 
               />
               <button 
                 type="submit" 
                 className="confirm-btn" 
-                style={{width: 'auto', margin: 0, padding: '8px 16px', flexShrink: 0}}
+                style={{ width: 'auto', margin: 0, padding: '0 24px' }}
               >
                 Add Funds
               </button>
             </form>
-
+ 
             <div className="history-section">
                <h3 className="section-title">Recent Transactions</h3>
-               {!wallet || wallet.transactions.length === 0 ? <p className="no-activity">No transactions yet.</p> : (
-                 <div className="transaction-list" style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+               {!wallet || wallet.transactions.length === 0 ? (
+                 <p className="no-activity">No transactions yet.</p>
+               ) : (
+                 <div className="transaction-list" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                    {wallet.transactions.map(tx => (
-                     <div key={tx.transaction_id} className="tx-item" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: 'white', border: '1px solid #ddd', borderRadius: '4px'}}>
-                        <div>
-                          <strong style={{ display: 'block', marginBottom: '4px' }}>{tx.type === 'credit' ? '🟢 Funds Added' : '🔴 Ride Payment'}</strong>
-                          <div style={{fontSize: '0.85em', color: '#666'}}>{new Date(tx.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</div>
+                     <div key={tx.transaction_id} className="tx-item">
+                        <div className="tx-info">
+                          <strong className="tx-type">
+                            {tx.type === 'credit' ? '🟢 Funds Added' : '🔴 Ride Payment'}
+                          </strong>
+                          <span className="tx-date">
+                            {new Date(tx.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                          </span>
                         </div>
-                        <div style={{fontWeight: 'bold', fontSize: '1.1em', color: tx.type === 'credit' ? '#2e7d32' : '#d32f2f'}}>
+                        <div className={`tx-amount ${tx.type === 'credit' ? 'credit' : 'debit'}`}>
                           {tx.type === 'credit' ? '+' : '-'}${Number(tx.amount).toFixed(2)}
                         </div>
                      </div>

@@ -241,23 +241,32 @@ export default function Driver() {
           <div className="tab-content">
             <h2 className="driver-title">My Earnings</h2>
             {wallet && (
-              <div className="earnings-card" style={{ padding: '20px', background: '#e8f5e9', borderRadius: '8px', marginBottom: '20px', border: '1px solid #c8e6c9', textAlign: 'center' }}>
-                <div style={{fontSize: '0.9em', color: '#2e7d32', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px'}}>Total Balance</div>
-                <h3 style={{margin: 0, fontSize: '2.5em', color: '#1b5e20'}}>{wallet.currency === 'USD' ? '$' : wallet.currency}{Number(wallet.balance).toFixed(2)}</h3>
+              <div className="earnings-card">
+                <div className="earnings-label">Available Balance</div>
+                <h3 className="earnings-value">
+                  {wallet.currency === 'USD' ? '$' : wallet.currency}
+                  {Number(wallet.balance).toFixed(2)}
+                </h3>
               </div>
             )}
             
             <div className="history-section">
                <h3 className="section-title">Recent Payouts</h3>
-               {!wallet || wallet.transactions.length === 0 ? <p className="no-activity">No earnings yet. Complete rides to earn!</p> : (
-                 <div className="transaction-list" style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+               {!wallet || wallet.transactions.length === 0 ? (
+                 <p className="no-activity">No earnings yet. Complete rides to earn!</p>
+               ) : (
+                 <div className="transaction-list" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                    {wallet.transactions.map(tx => (
-                     <div key={tx.transaction_id} className="tx-item" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: 'white', border: '1px solid #ddd', borderRadius: '4px'}}>
-                        <div>
-                          <strong style={{ display: 'block', marginBottom: '4px' }}>{tx.type === 'credit' ? '🟢 Ride Payment' : '🔴 Deduction'}</strong>
-                          <div style={{fontSize: '0.85em', color: '#666'}}>{new Date(tx.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</div>
+                     <div key={tx.transaction_id} className="tx-item">
+                        <div className="tx-info">
+                          <strong className="tx-type">
+                            {tx.type === 'credit' ? '🟢 Ride Payment' : '🔴 Deduction'}
+                          </strong>
+                          <span className="tx-date">
+                            {new Date(tx.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                          </span>
                         </div>
-                        <div style={{fontWeight: 'bold', fontSize: '1.1em', color: tx.type === 'credit' ? '#2e7d32' : '#d32f2f'}}>
+                        <div className={`tx-amount ${tx.type === 'credit' ? 'credit' : 'debit'}`}>
                           {tx.type === 'credit' ? '+' : '-'}${Number(tx.amount).toFixed(2)}
                         </div>
                      </div>
