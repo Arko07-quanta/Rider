@@ -21,6 +21,18 @@ router.get("/pending-drivers", authenticateAdmin, async (req: any, res: any) => 
   }
 });
 
+router.get("/verified-today", authenticateAdmin, async(req: any, res: any) => {
+  try {
+    const result = await pool.query(`
+      SELECT count(*) FROM drivers
+      WHERE is_verified = TRUE AND TO_CHAR(SYSDATE, 'MON') = TO_CHAR(created_at, 'MON')
+    `)
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 router.post("/verify-driver/:id", authenticateAdmin, async (req: any, res: any) => {
   const { id } = req.params;
   const client = await pool.connect();
@@ -30,7 +42,7 @@ router.post("/verify-driver/:id", authenticateAdmin, async (req: any, res: any) 
 
     // 1. Mark driver as verified
     await client.query(
-      "UPDATE drivers SET is_verified = TRUE WHERE user_id = $1",
+      "UPDATE drivers SET is_verified = TRUE, created_at = CURRENT_TIMESTAMP WHERE user_id = $1",
       [id]
     );
 

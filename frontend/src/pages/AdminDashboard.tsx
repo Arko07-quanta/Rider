@@ -14,6 +14,7 @@ export default function AdminDashboard() {
   const [activePanel, setActivePanel] = useState("insights");
   const [drivers, setDrivers] = useState<PendingDriver[]>([]);
   const [loading, setLoading] = useState(true);
+  const [verifiedToday, setVerifiedToday] = useState(0);
 
   const fetchQueue = async () => {
     try {
@@ -48,8 +49,21 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleVerifiedToday = async () => {
+    try {
+      const res = await api.get("api/admin/verified-today");
+      setVerifiedToday(res.data.rows[0].count);
+    } catch (err) {
+      console.error("Failed to fetch verified today");
+    }
+  };
+
   useEffect(() => {
     fetchQueue();
+  }, []);
+
+  useEffect( () => {
+    handleVerifiedToday();
   }, []);
 
   return (
@@ -106,7 +120,7 @@ export default function AdminDashboard() {
           </div>
           <div className="stat-card">
             <h3>Verified Today</h3>
-            <p className="stat-number">12</p>
+            <p className="stat-number">{verifiedToday}</p>
           </div>
         </section>
 
