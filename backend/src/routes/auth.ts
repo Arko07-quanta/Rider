@@ -1,14 +1,12 @@
 import express, { Request, Response } from "express";
 import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
 import pool from "../db";
 import { authenticateToken } from "../middleware/authMiddleware";
+import { generateToken, setAuthCookies, clearAuthCookies } from "../utils/authUtils";
 
 const router = express.Router();
 
-
-
-router.post("/signup", async (req: any, res: any) => {
+router.post("/signup", async (req: Request, res: Response) => {
   const { name, email, phone, password, role, license_number, plate, brand, model, vehicle_type_id } = req.body;
   const client = await pool.connect();
 
@@ -24,7 +22,7 @@ router.post("/signup", async (req: any, res: any) => {
       `INSERT INTO users (name, email, phone, password_hash, role) VALUES ($1, $2, $3, $4, $5) RETURNING user_id, role, token_version`,
       [name, email, phone, hashedPassword, role]
     );
-    const { user_id: userId, token_version: tokenVersion } = userRes.rows[0];
+    const { user_id: userId, role: userRole, token_version: tokenVersion } = userRes.rows[0];
 
     if (role === 'driver') {
       await client.query(
@@ -45,24 +43,10 @@ router.post("/signup", async (req: any, res: any) => {
 
     await client.query('COMMIT');
 
-    const token = jwt.sign({ id: userId, role, version: tokenVersion }, process.env.JWT_SECRET as string, { expiresIn: '1d' });
-    
-    // Cookie options
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax" as const,
-      maxAge: 24 * 60 * 60 * 1000 // 1 day
-    };
+    const token = generateToken({ id: userId, role: userRole, version: tokenVersion });
+    setAuthCookies(res, token, userRole);
 
-    res.cookie("token", token, cookieOptions);
-    res.cookie("auth_info", JSON.stringify({ role, exp: Date.now() + 24 * 60 * 60 * 1000 }), { 
-      ...cookieOptions, 
-      httpOnly: false // This allows frontend logic to read user state
-    });
-
-    res.status(201).json({ user: { id: userId, role, name } });
-
+    res.status(201).json({ user: { id: userId, role: userRole, name } });
   } catch (err: any) {
     await client.query('ROLLBACK');
     res.status(500).json({ message: err.message });
@@ -71,9 +55,7 @@ router.post("/signup", async (req: any, res: any) => {
   }
 });
 
-
-
-router.post("/login", async (req: any, res: any) => {
+router.post("/login", async (req: Request, res: Response) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
@@ -95,40 +77,17 @@ router.post("/login", async (req: any, res: any) => {
 
     const user = result.rows[0];
     const valid = await bcrypt.compare(password, user.password_hash);
-    const role = user.role;
-    const isVerified = user.is_verified;
 
     if (!valid) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    if (!process.env.JWT_SECRET) {
-      throw new Error("JWT_SECRET missing in .env");
-    }
-
-    if(role === "driver" && !isVerified){
+    if (user.role === "driver" && !user.is_verified) {
       return res.status(400).json({ message: "Driver not verified" });
     }
 
-    const token = jwt.sign(
-      { id: user.user_id, role: user.role, version: user.token_version }, 
-      process.env.JWT_SECRET as string, 
-      { expiresIn: "1h" }
-    );
-
-    // Cookie options
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax" as const,
-      maxAge: 60 * 60 * 1000 // 1 hour
-    };
-
-    res.cookie("token", token, cookieOptions);
-    res.cookie("auth_info", JSON.stringify({ role: user.role, exp: Date.now() + 60 * 60 * 1000 }), { 
-      ...cookieOptions, 
-      httpOnly: false 
-    });
+    const token = generateToken({ id: user.user_id, role: user.role, version: user.token_version });
+    setAuthCookies(res, token, user.role);
 
     res.json({ 
       message: "Login successful", 
@@ -140,26 +99,12 @@ router.post("/login", async (req: any, res: any) => {
   }
 });
 
-
-router.post("/logout", (_req: any, res: any) => {
-  res.clearCookie("token");
-  res.clearCookie("auth_info");
+router.post("/logout", (_req: Request, res: Response) => {
+  clearAuthCookies(res);
   res.json({ message: "Logged out successfully" });
 });
 
-router.get("/vehicle-types", async (req: any, res: any) => {
-  try {
-    const result = await pool.query(
-      "SELECT vehicle_type_id, type_name, max_passengers FROM vehicle_types ORDER BY type_name ASC"
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error("Error fetching vehicle types:", err);
-    res.status(500).json({ message: "Server error fetching vehicle types" });
-  }
-});
-
-router.get("/profile", authenticateToken, async (req: any, res: any) => {
+router.get("/profile", authenticateToken, async (req: any, res: Response) => {
   try {
     const result = await pool.query(
       "SELECT user_id, name, email, phone, role FROM users WHERE user_id = $1",
@@ -172,7 +117,7 @@ router.get("/profile", authenticateToken, async (req: any, res: any) => {
   }
 });
 
-router.put("/profile", authenticateToken, async (req: any, res: any) => {
+router.put("/profile", authenticateToken, async (req: any, res: Response) => {
   const { name, email, phone, password } = req.body;
   const userId = req.user.id;
 
@@ -199,15 +144,14 @@ router.put("/profile", authenticateToken, async (req: any, res: any) => {
       params.push(hashedPassword);
     }
 
-    query += " WHERE user_id = $" + (params.length + 1) + " RETURNING user_id, token_version";
+    query += " WHERE user_id = $" + (params.length + 1) + " RETURNING user_id, role, token_version";
     params.push(userId);
 
     const result = await client.query(query, params);
     await client.query("COMMIT");
 
     if (password) {
-      res.clearCookie("token");
-      res.clearCookie("auth_info");
+      clearAuthCookies(res);
       return res.json({ message: "Profile updated and password changed. Please log in again.", logout: true });
     }
 
@@ -220,6 +164,5 @@ router.put("/profile", authenticateToken, async (req: any, res: any) => {
     client.release();
   }
 });
-
 
 export default router;
