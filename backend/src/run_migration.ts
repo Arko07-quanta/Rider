@@ -4,7 +4,7 @@ import pool from "./db";
 
 async function run() {
   try {
-    const sql = fs.readFileSync(path.join(__dirname, "rider_database_maker.txt"), "utf-8");
+    const sql = fs.readFileSync(path.join(__dirname, "Rider_DataBase_maker.txt"), "utf-8");
     console.log("Running migration...");
     await pool.query(sql);
     console.log("Migration successful!");

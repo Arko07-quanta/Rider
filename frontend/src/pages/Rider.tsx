@@ -305,6 +305,17 @@ export default function Rider() {
     ? (dropoff ? { lat: dropoff.lat, lng: dropoff.lng } : null)
     : (selectedHistoryRide ? { lat: Number(selectedHistoryRide.dropoff_lat), lng: Number(selectedHistoryRide.dropoff_lng) } : null);
 
+  const selectedVehicle = vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType));
+
+  const estimatedFare = selectedVehicle 
+    ? Math.max(
+        Number(selectedVehicle.minimum_fare),
+        Number(selectedVehicle.base_fare) + (distanceKm * Number(selectedVehicle.fare_per_km))
+      ).toFixed(2)
+    : "0.00";
+
+const hasInsufficientBalance = wallet ? Number(wallet.balance) < Number(estimatedFare) : true;
+
   return (
     <div className="rider-container">
 
@@ -449,7 +460,7 @@ export default function Rider() {
               </div>
             )}
 
-            {distance && duration && (
+            {distance !== '' && duration !== '' && (
               <div className="estimate-card">
                 <h4 className="estimate-title">Trip Estimate</h4>
                 <div className="estimate-row">
@@ -479,10 +490,7 @@ export default function Rider() {
                   <div className="estimate-row" style={{ marginBottom: '20px', padding: '10px', background: '#e3f2fd', borderRadius: '6px' }}>
                     <span className="estimate-label" style={{ color: '#1565c0', fontWeight: 'bold' }}>Estimated Fare:</span>
                     <strong className="estimate-value" style={{ color: '#1565c0', fontSize: '1.2em' }}>
-                      ${Math.max(
-                        Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).minimum_fare),
-                        Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).base_fare) + (distanceKm * Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).fare_per_km))
-                      ).toFixed(2)}
+                      ${estimatedFare}
                     </strong>
                   </div>
                 )}
@@ -491,9 +499,16 @@ export default function Rider() {
                 <button
                   onClick={handleRequestRide}
                   className="btn-primary"
-                  style={{ width: '100%', marginTop: '8px' }}
+                  disabled={hasInsufficientBalance}
+                  style={{ 
+                    width: '100%', 
+                    marginTop: '8px',
+                    opacity: hasInsufficientBalance ? 0.6 : 1,
+                    cursor: hasInsufficientBalance ? 'not-allowed' : 'pointer',
+                    filter: hasInsufficientBalance ? 'grayscale(1)' : 'none'
+                  }}
                 >
-                  Confirm Ride
+                  {hasInsufficientBalance ? 'Insufficient Balance' : 'Confirm Ride'}
                 </button>
               </div>
             )}

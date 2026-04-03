@@ -71,8 +71,9 @@ router.post("/login", async (req: Request, res: Response) => {
       [email]
     );
 
+
     if (result.rows.length === 0) {
-      return res.status(400).json({ message: "Invalid credentials" });
+      return res.status(400).json({ message: "Invalid credentials"});
     }
 
     const user = result.rows[0];
