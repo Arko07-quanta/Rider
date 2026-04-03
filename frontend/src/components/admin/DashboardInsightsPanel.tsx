@@ -21,6 +21,21 @@ export default function DashboardInsightsPanel() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [hotspots, setHotspots] = useState<Hotspots | null>(null);
   const [loading, setLoading] = useState(true);
+  const [mtLoading, setMtLoading] = useState(false);
+  const [mtMsg, setMtMsg] = useState("");
+
+  const handleRunMaintenance = async () => {
+    setMtLoading(true);
+    setMtMsg("");
+    try {
+      const res = await api.post('/api/admin/run-maintenance');
+      setMtMsg(res.data.message);
+    } catch (err) {
+      setMtMsg("Maintenance failed. Check server logs.");
+    } finally {
+      setMtLoading(false);
+    }
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -102,6 +117,22 @@ export default function DashboardInsightsPanel() {
         </div>
       </div>
 
+      {/* 🛠️ System Maintenance Action */}
+      <div className="maintenance-section">
+        <div className="maintenance-content">
+          <h3>System Maintenance</h3>
+          <p>Execute advanced SQL stored procedures to optimize log tables and perform system-wide maintenance tasks.</p>
+        </div>
+        <button 
+          className="btn-maintenance" 
+          onClick={handleRunMaintenance}
+          disabled={mtLoading}
+        >
+          {mtLoading ? "Executing Procedure..." : "Trigger SQL Maintenance"}
+        </button>
+      </div>
+      {mtMsg && <div className={`maintenance-feedback ${mtMsg.includes("fail") ? "error" : "success"}`}>{mtMsg}</div>}
+
       <style>{`
         .insights-panel {
           padding: 24px 0;
@@ -164,6 +195,70 @@ export default function DashboardInsightsPanel() {
           color: var(--text-secondary);
           font-weight: 600;
           letter-spacing: 1px;
+        }
+
+        .maintenance-section {
+          background: rgba(34, 197, 94, 0.05);
+          border: 1px dashed var(--color-primary);
+          border-radius: var(--radius-md);
+          padding: 24px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 24px;
+          margin-top: 12px;
+        }
+
+        .maintenance-content h3 {
+          font-size: 16px;
+          font-weight: 800;
+          color: var(--color-primary);
+          margin-bottom: 4px;
+        }
+
+        .maintenance-content p {
+          font-size: 13px;
+          color: var(--text-secondary);
+          max-width: 500px;
+        }
+
+        .btn-maintenance {
+          background: var(--color-primary);
+          color: #000;
+          padding: 12px 24px;
+          border-radius: var(--radius-sm);
+          font-weight: 800;
+          font-size: 14px;
+          white-space: nowrap;
+          transition: var(--transition);
+        }
+
+        .btn-maintenance:hover:not(:disabled) {
+          transform: scale(1.05);
+          filter: brightness(1.1);
+        }
+
+        .btn-maintenance:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .maintenance-feedback {
+          padding: 12px;
+          border-radius: var(--radius-sm);
+          font-size: 13px;
+          text-align: center;
+          font-weight: 600;
+        }
+
+        .maintenance-feedback.success {
+          background: rgba(34, 197, 94, 0.1);
+          color: var(--color-primary);
+        }
+
+        .maintenance-feedback.error {
+          background: rgba(239, 68, 68, 0.1);
+          color: #ef4444;
         }
       `}</style>
     </div>

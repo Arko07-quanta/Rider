@@ -81,6 +81,23 @@ const initializeDatabase = async () => {
       console.log(`✅ Seeded Vehicle Type: ${v.name}`);
     }
 
+    // --- Seed SQL Project Promotions ---
+    const projectPromos = [
+      { code: 'WELCOME20', type: 'percentage', val: 20 },
+      { code: 'LOYALTY50', type: 'fixed', val: 50 }
+    ];
+
+    for (const p of projectPromos) {
+      const exists = await pool.query("SELECT 1 FROM promotions WHERE code=$1", [p.code]);
+      if (exists.rows.length === 0) {
+        await pool.query(
+          "INSERT INTO promotions (code, discount_type, value, usage_limit) VALUES ($1, $2, $3, 1000)",
+          [p.code, p.type, p.val]
+        );
+        console.log(`🎁 Seeded Project Promotion: ${p.code}`);
+      }
+    }
+
     const fakeUsers = [
       {
         name: "Test Rider",

@@ -175,6 +175,18 @@ router.get("/hotspots", authenticateAdmin, async (req: any, res: any) => {
   }
 });
 
+router.post("/run-maintenance", authenticateAdmin, async (req: any, res: any) => {
+  try {
+    const adminId = req.user.id;
+    // Call the stored procedure
+    await pool.query("CALL sp_system_maintenance($1)", [adminId]);
+    res.json({ message: "System maintenance procedure executed successfully." });
+  } catch (err) {
+    console.error("Maintenance procedure error:", err);
+    res.status(500).json({ message: "Failed to execute maintenance procedure." });
+  }
+});
+
 router.get("/system-logs", authenticateAdmin, async (req: any, res: any) => {
   try {
     const result = await pool.query(`
