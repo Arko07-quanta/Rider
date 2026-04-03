@@ -9,6 +9,7 @@ import Home from "./pages/Home";
 import AdminDashboard from "./pages/AdminDashboard";
 import Rider from "./pages/Rider";
 import Driver from "./pages/Driver";
+import Profile from "./pages/Profile";
 import Navbar from "./components/Navbar";
 import { checkAuthAndRedirect } from "./utils/auth";
 
@@ -39,6 +40,7 @@ function App() {
         <Route path="/home" element={<Home />} />
         <Route path="/rider" element={<Rider />} />
         <Route path="/driver" element={<Driver />} />
+        <Route path="/profile" element={<Profile />} />
         <Route path="/dashboard" element={<AdminDashboard />} />
       </Routes>
     </BrowserRouter>

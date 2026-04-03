@@ -2,6 +2,7 @@ import express, { Request, Response } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import pool from "../db";
+import { authenticateToken } from "../middleware/authMiddleware";
 
 const router = express.Router();
 
@@ -20,10 +21,10 @@ router.post("/signup", async (req: any, res: any) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     
     const userRes = await client.query(
-      `INSERT INTO users (name, email, phone, password_hash, role) VALUES ($1, $2, $3, $4, $5) RETURNING user_id, role`,
+      `INSERT INTO users (name, email, phone, password_hash, role) VALUES ($1, $2, $3, $4, $5) RETURNING user_id, role, token_version`,
       [name, email, phone, hashedPassword, role]
     );
-    const userId = userRes.rows[0].user_id;
+    const { user_id: userId, token_version: tokenVersion } = userRes.rows[0];
 
     if (role === 'driver') {
       await client.query(
@@ -44,7 +45,7 @@ router.post("/signup", async (req: any, res: any) => {
 
     await client.query('COMMIT');
 
-    const token = jwt.sign({ id: userId, role }, process.env.JWT_SECRET as string, { expiresIn: '1d' });
+    const token = jwt.sign({ id: userId, role, version: tokenVersion }, process.env.JWT_SECRET as string, { expiresIn: '1d' });
     
     // Cookie options
     const cookieOptions = {
@@ -81,7 +82,7 @@ router.post("/login", async (req: any, res: any) => {
 
   try {
     const result = await pool.query(
-      `SELECT u.user_id, u.password_hash, u.role, u.name, d.is_verified 
+      `SELECT u.user_id, u.password_hash, u.role, u.name, u.token_version, d.is_verified 
        FROM users u 
        LEFT JOIN drivers d ON u.user_id = d.user_id 
        WHERE u.email=$1`,
@@ -110,7 +111,7 @@ router.post("/login", async (req: any, res: any) => {
     }
 
     const token = jwt.sign(
-      { id: user.user_id, role: user.role }, 
+      { id: user.user_id, role: user.role, version: user.token_version }, 
       process.env.JWT_SECRET as string, 
       { expiresIn: "1h" }
     );
@@ -158,9 +159,67 @@ router.get("/vehicle-types", async (req: any, res: any) => {
   }
 });
 
+router.get("/profile", authenticateToken, async (req: any, res: any) => {
+  try {
+    const result = await pool.query(
+      "SELECT user_id, name, email, phone, role FROM users WHERE user_id = $1",
+      [req.user.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ message: "User not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ message: "Server error fetching profile" });
+  }
+});
 
+router.put("/profile", authenticateToken, async (req: any, res: any) => {
+  const { name, email, phone, password } = req.body;
+  const userId = req.user.id;
 
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
 
+    if (email || phone) {
+      const check = await client.query(
+        "SELECT user_id FROM users WHERE (email = $1 OR phone = $2) AND user_id != $3",
+        [email || null, phone || null, userId]
+      );
+      if (check.rows.length > 0) {
+        return res.status(409).json({ message: "Email or phone already in use" });
+      }
+    }
+
+    let query = "UPDATE users SET name = COALESCE($1, name), email = COALESCE($2, email), phone = COALESCE($3, phone)";
+    let params: any[] = [name || null, email || null, phone || null];
+
+    if (password) {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      query += ", password_hash = $4, token_version = token_version + 1";
+      params.push(hashedPassword);
+    }
+
+    query += " WHERE user_id = $" + (params.length + 1) + " RETURNING user_id, token_version";
+    params.push(userId);
+
+    const result = await client.query(query, params);
+    await client.query("COMMIT");
+
+    if (password) {
+      res.clearCookie("token");
+      res.clearCookie("auth_info");
+      return res.json({ message: "Profile updated and password changed. Please log in again.", logout: true });
+    }
+
+    res.json({ message: "Profile updated successfully", user: result.rows[0] });
+  } catch (err: any) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    res.status(500).json({ message: "Server error updating profile" });
+  } finally {
+    client.release();
+  }
+});
 
 
 export default router;

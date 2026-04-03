@@ -57,9 +57,12 @@ const Navbar: React.FC = () => {
                   Dashboard
                 </NavLink>
               )}
-              <button onClick={handleLogout} className="btn-secondary">
-                Logout
-              </button>
+               <NavLink to="/profile" className="nav-link">
+                 Profile
+               </NavLink>
+               <button onClick={handleLogout} className="btn-secondary">
+                 Logout
+               </button>
             </>
           ) : (
             <>

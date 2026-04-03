@@ -51,6 +51,7 @@ CREATE TABLE users (
   phone VARCHAR(20) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   role user_role NOT NULL,
+  token_version INT DEFAULT 1,
   status user_status DEFAULT 'active',
   email_verified BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
