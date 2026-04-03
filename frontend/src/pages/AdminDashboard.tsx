@@ -6,10 +6,10 @@ import VerificationPanel, { type PendingDriver } from "../components/admin/Verif
 import UserManagementPanel from "../components/admin/UserManagementPanel";
 import ActiveRidesPanel from "../components/admin/ActiveRidesPanel";
 import SystemLogsPanel from "../components/admin/SystemLogsPanel";
-import AnalyticsPanel from "../components/admin/AnalyticsPanel";
+import DashboardInsightsPanel from "../components/admin/DashboardInsightsPanel";
 
 export default function AdminDashboard() {
-  const [activePanel, setActivePanel] = useState("verification");
+  const [activePanel, setActivePanel] = useState("insights");
   const [drivers, setDrivers] = useState<PendingDriver[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -60,6 +60,10 @@ export default function AdminDashboard() {
             onClick={() => setActivePanel("verification")}
           >Verification Queue</button>
           <button
+            className={`nav-item ${activePanel === "insights" ? "active" : ""}`}
+            onClick={() => setActivePanel("insights")}
+          >Intelligence & Hotspots</button>
+          <button
             className={`nav-item ${activePanel === "users" ? "active" : ""}`}
             onClick={() => setActivePanel("users")}
           >User Management</button>
@@ -80,8 +84,8 @@ export default function AdminDashboard() {
 
       <main className="admin-content">
         <header className="admin-header">
-          <h1>Level 1: Verification Desk</h1>
-          <div className="user-profile">Admin ID: 001 (Level 1)</div>
+          <h1>{activePanel === "verification" ? "Verification Desk" : activePanel === "insights" ? "System Intelligence" : "Management Console"}</h1>
+          <div className="user-profile">Admin Status: SYSTEM_OPERATOR</div>
         </header>
 
         <section className="stats-grid">
@@ -96,6 +100,7 @@ export default function AdminDashboard() {
         </section>
 
         <div className="table-container">
+          {activePanel === "insights" && <DashboardInsightsPanel />}
           {activePanel === "verification" && (
             <VerificationPanel
               drivers={drivers}

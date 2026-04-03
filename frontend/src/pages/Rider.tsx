@@ -479,7 +479,8 @@ export default function Rider() {
                 {statusMsg && <p className="error-msg">{statusMsg}</p>}
                 <button
                   onClick={handleRequestRide}
-                  className="confirm-btn"
+                  className="btn-primary"
+                  style={{ width: '100%', marginTop: '8px' }}
                 >
                   Confirm Ride
                 </button>

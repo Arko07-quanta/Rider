@@ -1,13 +1,12 @@
 import express, { Request, Response } from "express";
 import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
 import pool from "../db";
+import { authenticateToken } from "../middleware/authMiddleware";
+import { generateToken, setAuthCookies, clearAuthCookies } from "../utils/authUtils";
 
 const router = express.Router();
 
-
-
-router.post("/signup", async (req: any, res: any) => {
+router.post("/signup", async (req: Request, res: Response) => {
   const { name, email, phone, password, role, license_number, plate, brand, model, vehicle_type_id } = req.body;
   const client = await pool.connect();
 
@@ -20,10 +19,10 @@ router.post("/signup", async (req: any, res: any) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     
     const userRes = await client.query(
-      `INSERT INTO users (name, email, phone, password_hash, role) VALUES ($1, $2, $3, $4, $5) RETURNING user_id, role`,
+      `INSERT INTO users (name, email, phone, password_hash, role) VALUES ($1, $2, $3, $4, $5) RETURNING user_id, role, token_version`,
       [name, email, phone, hashedPassword, role]
     );
-    const userId = userRes.rows[0].user_id;
+    const { user_id: userId, role: userRole, token_version: tokenVersion } = userRes.rows[0];
 
     if (role === 'driver') {
       await client.query(
@@ -44,24 +43,10 @@ router.post("/signup", async (req: any, res: any) => {
 
     await client.query('COMMIT');
 
-    const token = jwt.sign({ id: userId, role }, process.env.JWT_SECRET as string, { expiresIn: '1d' });
-    
-    // Cookie options
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax" as const,
-      maxAge: 24 * 60 * 60 * 1000 // 1 day
-    };
+    const token = generateToken({ id: userId, role: userRole, version: tokenVersion });
+    setAuthCookies(res, token, userRole);
 
-    res.cookie("token", token, cookieOptions);
-    res.cookie("auth_info", JSON.stringify({ role, exp: Date.now() + 24 * 60 * 60 * 1000 }), { 
-      ...cookieOptions, 
-      httpOnly: false // This allows frontend logic to read user state
-    });
-
-    res.status(201).json({ user: { id: userId, role, name } });
-
+    res.status(201).json({ user: { id: userId, role: userRole, name } });
   } catch (err: any) {
     await client.query('ROLLBACK');
     res.status(500).json({ message: err.message });
@@ -70,9 +55,7 @@ router.post("/signup", async (req: any, res: any) => {
   }
 });
 
-
-
-router.post("/login", async (req: any, res: any) => {
+router.post("/login", async (req: Request, res: Response) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
@@ -81,7 +64,7 @@ router.post("/login", async (req: any, res: any) => {
 
   try {
     const result = await pool.query(
-      `SELECT u.user_id, u.password_hash, u.role, u.name, d.is_verified 
+      `SELECT u.user_id, u.password_hash, u.role, u.name, u.token_version, d.is_verified 
        FROM users u 
        LEFT JOIN drivers d ON u.user_id = d.user_id 
        WHERE u.email=$1`,
@@ -94,40 +77,17 @@ router.post("/login", async (req: any, res: any) => {
 
     const user = result.rows[0];
     const valid = await bcrypt.compare(password, user.password_hash);
-    const role = user.role;
-    const isVerified = user.is_verified;
 
     if (!valid) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    if (!process.env.JWT_SECRET) {
-      throw new Error("JWT_SECRET missing in .env");
-    }
-
-    if(role === "driver" && !isVerified){
+    if (user.role === "driver" && !user.is_verified) {
       return res.status(400).json({ message: "Driver not verified" });
     }
 
-    const token = jwt.sign(
-      { id: user.user_id, role: user.role }, 
-      process.env.JWT_SECRET as string, 
-      { expiresIn: "1h" }
-    );
-
-    // Cookie options
-    const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax" as const,
-      maxAge: 60 * 60 * 1000 // 1 hour
-    };
-
-    res.cookie("token", token, cookieOptions);
-    res.cookie("auth_info", JSON.stringify({ role: user.role, exp: Date.now() + 60 * 60 * 1000 }), { 
-      ...cookieOptions, 
-      httpOnly: false 
-    });
+    const token = generateToken({ id: user.user_id, role: user.role, version: user.token_version });
+    setAuthCookies(res, token, user.role);
 
     res.json({ 
       message: "Login successful", 
@@ -139,28 +99,70 @@ router.post("/login", async (req: any, res: any) => {
   }
 });
 
-
-router.post("/logout", (_req: any, res: any) => {
-  res.clearCookie("token");
-  res.clearCookie("auth_info");
+router.post("/logout", (_req: Request, res: Response) => {
+  clearAuthCookies(res);
   res.json({ message: "Logged out successfully" });
 });
 
-router.get("/vehicle-types", async (req: any, res: any) => {
+router.get("/profile", authenticateToken, async (req: any, res: Response) => {
   try {
     const result = await pool.query(
-      "SELECT vehicle_type_id, type_name, max_passengers FROM vehicle_types ORDER BY type_name ASC"
+      "SELECT user_id, name, email, phone, role FROM users WHERE user_id = $1",
+      [req.user.id]
     );
-    res.json(result.rows);
+    if (result.rows.length === 0) return res.status(404).json({ message: "User not found" });
+    res.json(result.rows[0]);
   } catch (err) {
-    console.error("Error fetching vehicle types:", err);
-    res.status(500).json({ message: "Server error fetching vehicle types" });
+    res.status(500).json({ message: "Server error fetching profile" });
   }
 });
 
+router.put("/profile", authenticateToken, async (req: any, res: Response) => {
+  const { name, email, phone, password } = req.body;
+  const userId = req.user.id;
 
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
 
+    if (email || phone) {
+      const check = await client.query(
+        "SELECT user_id FROM users WHERE (email = $1 OR phone = $2) AND user_id != $3",
+        [email || null, phone || null, userId]
+      );
+      if (check.rows.length > 0) {
+        return res.status(409).json({ message: "Email or phone already in use" });
+      }
+    }
 
+    let query = "UPDATE users SET name = COALESCE($1, name), email = COALESCE($2, email), phone = COALESCE($3, phone)";
+    let params: any[] = [name || null, email || null, phone || null];
 
+    if (password) {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      query += ", password_hash = $4, token_version = token_version + 1";
+      params.push(hashedPassword);
+    }
+
+    query += " WHERE user_id = $" + (params.length + 1) + " RETURNING user_id, role, token_version";
+    params.push(userId);
+
+    const result = await client.query(query, params);
+    await client.query("COMMIT");
+
+    if (password) {
+      clearAuthCookies(res);
+      return res.json({ message: "Profile updated and password changed. Please log in again.", logout: true });
+    }
+
+    res.json({ message: "Profile updated successfully", user: result.rows[0] });
+  } catch (err: any) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    res.status(500).json({ message: "Server error updating profile" });
+  } finally {
+    client.release();
+  }
+});
 
 export default router;

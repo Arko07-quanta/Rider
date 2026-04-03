@@ -2,6 +2,7 @@ DROP TABLE IF EXISTS
   chat_messages,
   admin_actions,
   promotions,
+  user_coupons,
   driver_status,
   trip_history,
   reviews,
@@ -50,6 +51,7 @@ CREATE TABLE users (
   phone VARCHAR(20) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   role user_role NOT NULL,
+  token_version INT DEFAULT 1,
   status user_status DEFAULT 'active',
   email_verified BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -235,6 +237,92 @@ CREATE TABLE promotions (
   expiry_date DATE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE user_coupons (
+  user_coupon_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+  promo_id BIGINT NOT NULL REFERENCES promotions(promo_id) ON DELETE CASCADE,
+  is_used BOOLEAN DEFAULT FALSE,
+  earned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, promo_id)
+);
+
+-- ─── TRIGGER FUNCTIONS ───
+
+CREATE OR REPLACE FUNCTION fn_reward_rider_coupons()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_rider_id BIGINT;
+    v_ride_count INT;
+    v_promo_id BIGINT;
+BEGIN
+    -- Only trigger when a ride is COMPLETED
+    IF (NEW.status = 'completed') THEN
+        -- Get the rider_id from the ride_requests table
+        SELECT rider_id INTO v_rider_id 
+        FROM ride_requests 
+        WHERE request_id = NEW.request_id;
+
+        -- Count successfully completed rides for this rider
+        SELECT COUNT(*) INTO v_ride_count 
+        FROM rides r
+        JOIN ride_requests req ON r.request_id = req.request_id
+        WHERE req.rider_id = v_rider_id AND r.status = 'completed';
+
+        -- 1. Reward on 1st Ride (Welcome Coupon)
+        IF v_ride_count = 1 THEN
+            SELECT promo_id INTO v_promo_id FROM promotions WHERE code = 'WELCOME20' LIMIT 1;
+            IF v_promo_id IS NOT NULL THEN
+                INSERT INTO user_coupons (user_id, promo_id) 
+                VALUES (v_rider_id, v_promo_id)
+                ON CONFLICT DO NOTHING;
+            END IF;
+        END IF;
+
+        -- 2. Reward on 20th Ride (Loyalty Coupon)
+        IF v_ride_count = 20 THEN
+            SELECT promo_id INTO v_promo_id FROM promotions WHERE code = 'LOYALTY50' LIMIT 1;
+            IF v_promo_id IS NOT NULL THEN
+                INSERT INTO user_coupons (user_id, promo_id) 
+                VALUES (v_rider_id, v_promo_id)
+                ON CONFLICT DO NOTHING;
+            END IF;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ─── TRIGGERS ───
+
+CREATE TRIGGER trg_after_ride_complete
+AFTER UPDATE OF status ON rides
+FOR EACH ROW
+EXECUTE FUNCTION fn_reward_rider_coupons();
+
+-- ─── STORED PROCEDURES ───
+
+CREATE OR REPLACE PROCEDURE sp_system_maintenance(p_admin_id BIGINT)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    -- 1. Log the start of maintenance
+    INSERT INTO admin_actions (admin_id, action_description)
+    VALUES (p_admin_id, 'SYSTEM_MAINTENANCE: Cleaning up logs and optimizing system tables...');
+
+    -- 2. Cleanup old chat messages (older than 30 days)
+    DELETE FROM chat_messages WHERE sent_at < (CURRENT_TIMESTAMP - INTERVAL '30 days');
+
+    -- 3. Cleanup very old admin actions (older than 90 days)
+    DELETE FROM admin_actions WHERE timestamp < (CURRENT_TIMESTAMP - INTERVAL '90 days');
+
+    -- 4. Mark the end of maintenance
+    INSERT INTO admin_actions (admin_id, action_description)
+    VALUES (p_admin_id, 'SYSTEM_MAINTENANCE: Completed successfully.');
+    
+    COMMIT;
+END;
+$$;
 
 CREATE TABLE admin_actions (
   action_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

@@ -100,6 +100,88 @@ router.get("/active-rides", authenticateAdmin, async (req: any, res: any) => {
   }
 });
 
+router.get("/dashboard-stats", authenticateAdmin, async (req: any, res: any) => {
+  try {
+    // 1. Total Revenue & Completed Rides
+    const financialStats = await pool.query(`
+      SELECT 
+        COALESCE(SUM(fare), 0) AS total_revenue,
+        COUNT(*) AS total_completed_rides,
+        AVG(fare) AS avg_fare
+      FROM rides 
+      WHERE status = 'completed'
+    `);
+
+    // 2. User Growth (Last 7 Days)
+    const userGrowth = await pool.query(`
+      SELECT 
+        DATE(created_at) AS day,
+        COUNT(*) AS signup_count
+      FROM users
+      WHERE created_at > CURRENT_DATE - INTERVAL '7 days'
+      GROUP BY DATE(created_at)
+      ORDER BY day ASC
+    `);
+
+    // 3. Ride Status Counts
+    const statusCounts = await pool.query(`
+      SELECT status, COUNT(*) AS count
+      FROM rides
+      GROUP BY status
+    `);
+
+    res.json({
+      financials: financialStats.rows[0],
+      growth: userGrowth.rows,
+      statusBreakdown: statusCounts.rows
+    });
+  } catch (err) {
+    console.error("Dashboard stats error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/hotspots", authenticateAdmin, async (req: any, res: any) => {
+  try {
+    // Top 5 Pickups
+    const pickups = await pool.query(`
+      SELECT l.address, COUNT(*) AS ride_count
+      FROM rides r
+      JOIN locations l ON r.pickup_location_id = l.location_id
+      GROUP BY l.address
+      ORDER BY ride_count DESC
+      LIMIT 5
+    `);
+
+    // Top 5 Dropoffs
+    const dropoffs = await pool.query(`
+      SELECT l.address, COUNT(*) AS ride_count
+      FROM rides r
+      JOIN locations l ON r.dropoff_location_id = l.location_id
+      GROUP BY l.address
+      ORDER BY ride_count DESC
+      LIMIT 5
+    `);
+
+    res.json({ pickups: pickups.rows, dropoffs: dropoffs.rows });
+  } catch (err) {
+    console.error("Hotspots error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.post("/run-maintenance", authenticateAdmin, async (req: any, res: any) => {
+  try {
+    const adminId = req.user.id;
+    // Call the stored procedure
+    await pool.query("CALL sp_system_maintenance($1)", [adminId]);
+    res.json({ message: "System maintenance procedure executed successfully." });
+  } catch (err) {
+    console.error("Maintenance procedure error:", err);
+    res.status(500).json({ message: "Failed to execute maintenance procedure." });
+  }
+});
+
 router.get("/system-logs", authenticateAdmin, async (req: any, res: any) => {
   try {
     const result = await pool.query(`
