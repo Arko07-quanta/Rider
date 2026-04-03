@@ -191,6 +191,7 @@ CREATE TABLE rides (
   start_time TIMESTAMP,
   end_time TIMESTAMP,
   distance NUMERIC(10,2) DEFAULT 0.00 CHECK (distance >= 0),
+  duration NUMERIC(10,2) DEFAULT 0.00 CHECK (duration >= 0),
   fare NUMERIC(10,2) DEFAULT 0.00 CHECK (fare >= 0),
   applied_promo_id BIGINT REFERENCES promotions(promo_id) ON DELETE SET NULL,
   discount_amount NUMERIC(10,2) DEFAULT 0.00 CHECK (discount_amount >= 0),

@@ -103,7 +103,7 @@ router.post("/validate-coupon", authenticateToken, async (req: any, res: any) =>
 });
 
 router.post("/request", authenticateToken, async (req: any, res: any) => {
-  const { pickup_address, dropoff_address, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, vehicle_type_id, distance_km, coupon_code } = req.body;
+  const { pickup_address, dropoff_address, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, vehicle_type_id, distance_km, duration, coupon_code } = req.body;
   if (!vehicle_type_id) {
     return res.status(400).json({ message: "vehicle_type_id is required" });
   }
@@ -161,9 +161,9 @@ router.post("/request", authenticateToken, async (req: any, res: any) => {
     const request_id = reqResult.rows[0].request_id;
 
     await client.query(
-      `INSERT INTO rides (request_id, driver_id, pickup_location_id, dropoff_location_id, status, distance, fare, applied_promo_id, discount_amount)
-       VALUES ($1, NULL, $2, $3, 'ongoing', $4, $5, $6, $7)`,
-      [request_id, pickupLocId, dropoffLocId, distance_km || 0, fare, promo_id, discount_amount]
+      `INSERT INTO rides (request_id, driver_id, pickup_location_id, dropoff_location_id, status, distance, fare, duration, applied_promo_id, discount_amount)
+       VALUES ($1, NULL, $2, $3, 'ongoing', $4, $5, $6, $7, $8)`,
+      [request_id, pickupLocId, dropoffLocId, distance_km || 0, fare, duration || 0, promo_id, discount_amount]
     );
 
     // If a coupon was applied, mark it as used immediately to prevent double usage 
@@ -302,7 +302,8 @@ router.get("/pending", authenticateToken, async (req: any, res: any) => {
               lp.latitude AS pickup_lat, lp.longitude AS pickup_lng,
               ld.latitude AS dropoff_lat, ld.longitude AS dropoff_lng,
               rq.created_at,
-              vt.type_name as vehicle_type
+              vt.type_name as vehicle_type,
+              r.distance, (r.fare * 0.8) as fare, r.duration
        FROM ride_requests rq
        JOIN users u ON u.user_id = rq.rider_id
        JOIN rides r ON r.request_id = rq.request_id
@@ -334,7 +335,9 @@ router.get("/activity", authenticateToken, async (req: any, res: any) => {
           r.created_at,
           lp.address AS pickup_address, 
           ld.address AS dropoff_address,
-          u_rider.name AS rider_name
+          u_rider.name AS rider_name,
+          r.distance,
+          (r.fare * 0.8) AS fare
        FROM rides r
        JOIN ride_requests rq ON rq.request_id = r.request_id
        JOIN locations lp ON lp.location_id = r.pickup_location_id
@@ -401,7 +404,7 @@ router.get("/my-ride", authenticateToken, async (req: any, res: any) => {
   const driver_id = req.user.id;
   try {
     const result = await pool.query(
-      `SELECT r.ride_id, r.status,
+      `SELECT r.ride_id, r.status, r.distance, (r.fare * 0.8) as fare, r.duration,
               u.name AS rider_name, u.phone AS rider_phone,
               lp.address AS pickup_address, ld.address AS dropoff_address,
               lp.latitude AS pickup_lat, lp.longitude AS pickup_lng,
@@ -478,11 +481,11 @@ router.post("/complete/:rideId", authenticateToken, async (req: any, res: any) =
          [r_wallet_id, rideId, finalRiderCost]
        );
 
-       // Driver gets full Original Fare
-       await client.query(`UPDATE wallets SET balance = balance + $1, updated_at = NOW() WHERE wallet_id = $2`, [fare, d_wallet_id]);
+       // Driver gets 80% commission
+       await client.query(`UPDATE wallets SET balance = balance + $1, updated_at = NOW() WHERE wallet_id = $2`, [0.8*fare, d_wallet_id]);
        await client.query(
          `INSERT INTO transactions (wallet_id, ride_id, type, amount, status, payment_method) VALUES ($1, $2, 'credit', $3, 'completed', 'Wallet')`,
-         [d_wallet_id, rideId, fare]
+         [d_wallet_id, rideId, 0.8*fare]
        );
     }
 

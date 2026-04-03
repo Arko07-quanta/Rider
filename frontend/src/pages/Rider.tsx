@@ -28,6 +28,7 @@ export default function Rider() {
   const [distance, setDistance] = useState('');
   const [duration, setDuration] = useState('');
   const [distanceKm, setDistanceKm] = useState(0);
+  const [durationMin, setDurationMin] = useState(0);
   const [requests, setRequests] = useState<RideData[]>([]);
   const [statusMsg, setStatusMsg] = useState('');
   const [selectedHistoryRide, setSelectedHistoryRide] = useState<RideData | null>(null);
@@ -277,10 +278,11 @@ export default function Rider() {
     if (showCouponModal) fetchCoupons();
   }, [showCouponModal, fetchCoupons]);
 
-  const handleRouteCalculated = (dist: string, dur: string, distVal: number) => {
+  const handleRouteCalculated = (dist: string, dur: string, distVal: number, durVal: number) => {
     setDistance(dist);
     setDuration(dur);
     setDistanceKm(distVal / 1000);
+    setDurationMin(Math.round(durVal / 60));
   };
 
   const handleRequestRide = async () => {
@@ -296,7 +298,8 @@ export default function Rider() {
         dropoff_lng: dropoff.lng,
         vehicle_type_id: selectedVehicleType,
         distance_km: distanceKm,
-        coupon_code: couponCode
+        coupon_code: couponCode,
+        duration: durationMin
       });
       setPickup(null);
       setDropoff(null);
@@ -304,6 +307,7 @@ export default function Rider() {
       setDuration('');
       setCouponCode('');
       setDiscount(0);
+      setDurationMin(0);
       fetchHistory();
       setActiveTab('history');
     } catch (err: any) {
@@ -358,6 +362,17 @@ export default function Rider() {
   const mapDestination = activeTab === 'book'
     ? (dropoff ? { lat: dropoff.lat, lng: dropoff.lng } : null)
     : (selectedHistoryRide ? { lat: Number(selectedHistoryRide.dropoff_lat), lng: Number(selectedHistoryRide.dropoff_lng) } : null);
+
+  const selectedVehicle = vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType));
+
+  const estimatedFare = selectedVehicle 
+    ? Math.max(
+        Number(selectedVehicle.minimum_fare),
+        Number(selectedVehicle.base_fare) + (distanceKm * Number(selectedVehicle.fare_per_km))
+      ).toFixed(2)
+    : "0.00";
+
+const hasInsufficientBalance = wallet ? Number(wallet.balance) < Number(estimatedFare) : true;
 
   return (
     <div className="rider-container">
@@ -503,7 +518,7 @@ export default function Rider() {
               </div>
             )}
 
-            {distance && duration && (
+            {distance !== '' && duration !== '' && (
               <div className="estimate-card">
                 <h4 className="estimate-title">Trip Estimate</h4>
                 <div className="estimate-row">
@@ -534,10 +549,7 @@ export default function Rider() {
                     <div className="estimate-row">
                       <span className="estimate-label">Original Fare:</span>
                       <span className="estimate-value">
-                        ${Math.max(
-                          Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).minimum_fare),
-                          Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).base_fare) + (distanceKm * Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).fare_per_km))
-                        ).toFixed(2)}
+                        ${estimatedFare}
                       </span>
                     </div>
                     
@@ -579,10 +591,7 @@ export default function Rider() {
                     <div className="estimate-row" style={{ marginTop: '8px', padding: '12px', background: 'rgba(34, 197, 94, 0.1)', borderRadius: '8px' }}>
                       <span className="estimate-label" style={{ fontWeight: '800', color: 'var(--text-main)' }}>Total to Pay:</span>
                       <strong className="estimate-value" style={{ fontSize: '1.4em', color: 'var(--color-primary)' }}>
-                        ${(Math.max(
-                          Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).minimum_fare),
-                          Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).base_fare) + (distanceKm * Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).fare_per_km))
-                        ) - discount).toFixed(2)}
+                        ${(Number(estimatedFare) - discount).toFixed(2)}
                       </strong>
                     </div>
                   </div>
@@ -592,9 +601,16 @@ export default function Rider() {
                 <button
                   onClick={handleRequestRide}
                   className="btn-primary"
-                  style={{ width: '100%', marginTop: '8px' }}
+                  disabled={hasInsufficientBalance}
+                  style={{ 
+                    width: '100%', 
+                    marginTop: '8px',
+                    opacity: hasInsufficientBalance ? 0.6 : 1,
+                    cursor: hasInsufficientBalance ? 'not-allowed' : 'pointer',
+                    filter: hasInsufficientBalance ? 'grayscale(1)' : 'none'
+                  }}
                 >
-                  Confirm Ride
+                  {hasInsufficientBalance ? 'Insufficient Balance' : 'Confirm Ride'}
                 </button>
               </div>
             )}
