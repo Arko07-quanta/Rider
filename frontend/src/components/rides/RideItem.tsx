@@ -13,6 +13,7 @@ export interface RideData {
   dropoff_lat?: number | string | null;
   dropoff_lng?: number | string | null;
   distance?: number | string | null;
+  duration?: number | string | null;
   fare?: number | string | null;
   driver_name?: string | null;
   driver_phone?: string | null;
@@ -62,6 +63,14 @@ export default function RideItem({ ride, showRider, onClick, active }: RideItemP
           <span className="address-text">{ride.dropoff_address.split(',')[0]}</span>
         </div>
       </div>
+
+      {(ride.distance || ride.duration || ride.fare) && (
+        <div className="ride-meta" style={{ display: 'flex', gap: '12px', fontSize: '0.85em', color: '#666', borderTop: '1px solid #f0f0f0', paddingTop: '8px', marginBottom: '8px' }}>
+          {ride.distance && <span>📍 {Number(ride.distance).toFixed(1)} km</span>}
+          {ride.duration && <span>⏱️ {Math.round(Number(ride.duration))} mins</span>}
+          {ride.fare && <span style={{ color: '#16a34a', fontWeight: 'bold' }}>💰 ${Number(ride.fare).toFixed(2)}</span>}
+        </div>
+      )}
 
       <div className="ride-footer">
         {showRider ? (

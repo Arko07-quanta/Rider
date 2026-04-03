@@ -17,6 +17,9 @@ interface PendingRequest {
   dropoff_lat: number;
   dropoff_lng: number;
   created_at: string;
+  distance: number;
+  fare: number;
+  duration: number;
 }
 
 interface Transaction {
@@ -38,6 +41,9 @@ interface ActiveRide {
   pickup_lng: number;
   dropoff_lat: number;
   dropoff_lng: number;
+  distance: number;
+  fare: number;
+  duration: number;
 }
 
 export default function Driver() {
@@ -298,6 +304,21 @@ export default function Driver() {
                     <span className="active-ride-address-label">Drop-off:</span>
                     <p className="active-ride-address-value">{activeRide.dropoff_address.split(',')[0]}</p>
                   </div>
+                  <hr className="active-ride-separator" />
+                  <div className="active-ride-stats" style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px' }}>
+                    <div className="stat-item">
+                      <span className="stat-label" style={{ fontSize: '0.8em', color: '#666' }}>Distance</span>
+                      <strong className="stat-value" style={{ display: 'block' }}>{Number(activeRide.distance).toFixed(1)} km</strong>
+                    </div>
+                    <div className="stat-item">
+                      <span className="stat-label" style={{ fontSize: '0.8em', color: '#666' }}>Time</span>
+                      <strong className="stat-value" style={{ display: 'block' }}>{Math.round(activeRide.duration)} mins</strong>
+                    </div>
+                    <div className="stat-item">
+                      <span className="stat-label" style={{ fontSize: '0.8em', color: '#666' }}>Your Payout</span>
+                      <strong className="stat-value" style={{ display: 'block', color: '#16a34a' }}>${(Number(activeRide.fare) * 0.8).toFixed(2)}</strong>
+                    </div>
+                  </div>
                 </div>
                 <div className="active-ride-actions">
                   <button
@@ -331,6 +352,20 @@ export default function Driver() {
                     </div>
                     <div className="preview-body">
                       <p><strong>Rider:</strong> {selectedPreview.rider_name}</p>
+                      <div className="preview-stats" style={{ display: 'flex', gap: '15px', margin: '10px 0', padding: '10px', background: '#f8fafc', borderRadius: '6px' }}>
+                        <div>
+                          <span style={{ fontSize: '0.8em', color: '#64748b' }}>Distance:</span>
+                          <div style={{ fontWeight: 'bold' }}>{Number(selectedPreview.distance).toFixed(1)} km</div>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '0.8em', color: '#64748b' }}>Time:</span>
+                          <div style={{ fontWeight: 'bold' }}>{Math.round(selectedPreview.duration)} mins</div>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '0.8em', color: '#64748b' }}>Your Payout:</span>
+                          <div style={{ fontWeight: 'bold', color: '#16a34a' }}>${(Number(selectedPreview.fare) * 0.8).toFixed(2)}</div>
+                        </div>
+                      </div>
                       <button
                         className="btn-primary"
                         style={{ width: '100%', marginTop: '12px' }}
@@ -360,7 +395,9 @@ export default function Driver() {
                           created_at: req.created_at,
                           pickup_address: req.pickup_address,
                           dropoff_address: req.dropoff_address,
-                          rider_name: req.rider_name
+                          rider_name: req.rider_name,
+                          distance: req.distance,
+                          fare: Number(req.fare) * 0.8
                         }}
                         showRider
                         onClick={() => setSelectedPreview(req)}

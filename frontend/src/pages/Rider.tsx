@@ -28,6 +28,7 @@ export default function Rider() {
   const [distance, setDistance] = useState('');
   const [duration, setDuration] = useState('');
   const [distanceKm, setDistanceKm] = useState(0);
+  const [durationMin, setDurationMin] = useState(0);
   const [requests, setRequests] = useState<RideData[]>([]);
   const [statusMsg, setStatusMsg] = useState('');
   const [selectedHistoryRide, setSelectedHistoryRide] = useState<RideData | null>(null);
@@ -259,10 +260,11 @@ export default function Rider() {
     fetchVehicles();
   }, [fetchHistory]);
 
-  const handleRouteCalculated = (dist: string, dur: string, distVal: number) => {
+  const handleRouteCalculated = (dist: string, dur: string, distVal: number, durVal: number) => {
     setDistance(dist);
     setDuration(dur);
     setDistanceKm(distVal / 1000);
+    setDurationMin(Math.round(durVal / 60));
   };
 
   const handleRequestRide = async () => {
@@ -277,12 +279,14 @@ export default function Rider() {
         dropoff_lat: dropoff.lat,
         dropoff_lng: dropoff.lng,
         vehicle_type_id: selectedVehicleType,
-        distance_km: distanceKm
+        distance_km: distanceKm,
+        duration: durationMin
       });
       setPickup(null);
       setDropoff(null);
       setDistance('');
       setDuration('');
+      setDurationMin(0);
       fetchHistory();
       setActiveTab('history');
     } catch (err: any) {

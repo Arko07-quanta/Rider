@@ -4,9 +4,8 @@ import pool from "./db";
 
 async function run() {
   try {
-    const sql = fs.readFileSync(path.join(__dirname, "Rider_DataBase_maker.txt"), "utf-8");
-    console.log("Running migration...");
-    await pool.query(sql);
+    console.log("Running incremental migration: and adding duration column...");
+    await pool.query("ALTER TABLE rides ADD COLUMN IF NOT EXISTS duration NUMERIC(10,2) DEFAULT 0.00 CHECK (duration >= 0)");
     console.log("Migration successful!");
     process.exit(0);
   } catch (err) {
