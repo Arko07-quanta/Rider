@@ -7,6 +7,8 @@ import UserManagementPanel from "../components/admin/UserManagementPanel";
 import ActiveRidesPanel from "../components/admin/ActiveRidesPanel";
 import SystemLogsPanel from "../components/admin/SystemLogsPanel";
 import DashboardInsightsPanel from "../components/admin/DashboardInsightsPanel";
+import AnalyticsPanel from "../components/admin/AnalyticsPanel";
+import PromotionsPanel from "../components/admin/PromotionsPanel";
 
 export default function AdminDashboard() {
   const [activePanel, setActivePanel] = useState("insights");
@@ -79,12 +81,21 @@ export default function AdminDashboard() {
             className={`nav-item ${activePanel === "analytics" ? "active" : ""}`}
             onClick={() => setActivePanel("analytics")}
           >Analytics Hub</button>
+          <button
+            className={`nav-item ${activePanel === "promotions" ? "active" : ""}`}
+            onClick={() => setActivePanel("promotions")}
+          >Promotions & Coupons</button>
         </nav>
       </aside>
 
       <main className="admin-content">
         <header className="admin-header">
-          <h1>{activePanel === "verification" ? "Verification Desk" : activePanel === "insights" ? "System Intelligence" : "Management Console"}</h1>
+          <h1>
+            {activePanel === "verification" ? "Verification Desk" : 
+             activePanel === "insights" ? "System Intelligence" : 
+             activePanel === "promotions" ? "Marketing & Rewards" :
+             "Management Console"}
+          </h1>
           <div className="user-profile">Admin Status: SYSTEM_OPERATOR</div>
         </header>
 
@@ -113,6 +124,7 @@ export default function AdminDashboard() {
           {activePanel === "rides" && <ActiveRidesPanel />}
           {activePanel === "logs" && <SystemLogsPanel />}
           {activePanel === "analytics" && <AnalyticsPanel />}
+          {activePanel === "promotions" && <PromotionsPanel />}
         </div>
       </main>
     </div>

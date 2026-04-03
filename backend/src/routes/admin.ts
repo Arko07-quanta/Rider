@@ -1,6 +1,7 @@
 import express, { Request, Response } from "express";
 import pool from "../db";
 import { authenticateAdmin } from "../middleware/authMiddleware";
+import { logAdminAction } from "../utils/logger";
 
 const router = express.Router();
 
@@ -36,6 +37,9 @@ router.post("/verify-driver/:id", authenticateAdmin, async (req: any, res: any) 
     // 2. Commit
     await client.query("COMMIT");
 
+    // 3. Log Action
+    await logAdminAction(req.user.id, `Admin ${req.user.name} verified driver with ID ${id}`);
+
     res.json({ message: "Driver verified successfully" });
 
   } catch (err: any) {
@@ -53,6 +57,10 @@ router.delete("/decline-driver/:id", authenticateAdmin, async (req: any, res: an
   
   try {
     await client.query("CALL reject_driver_application($1, $2)", [id, req.user.id]);
+    
+    // Log Action
+    await logAdminAction(req.user.id, `Admin ${req.user.name} declined driver application with ID ${id}`);
+
     res.json({ message: "Driver declined and deleted" });
   } catch (err: any) {
     await client.query("ROLLBACK");
@@ -175,6 +183,10 @@ router.post("/run-maintenance", authenticateAdmin, async (req: any, res: any) =>
     const adminId = req.user.id;
     // Call the stored procedure
     await pool.query("CALL sp_system_maintenance($1)", [adminId]);
+    
+    // Express level logging (SP already logs internally, but this adds consistency)
+    await logAdminAction(adminId, `Admin ${req.user.name} initiated system maintenance`);
+
     res.json({ message: "System maintenance procedure executed successfully." });
   } catch (err) {
     console.error("Maintenance procedure error:", err);
@@ -247,6 +259,98 @@ router.get("/analytics-cashflow", authenticateAdmin, async (req: any, res: any) 
     res.json(result.rows);
   } catch (err) {
     console.error("Analytics cashflow error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Coupon Management
+router.get("/coupons", authenticateAdmin, async (req: any, res: any) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM promotions ORDER BY created_at DESC"
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Get admin coupons error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.post("/coupons", authenticateAdmin, async (req: any, res: any) => {
+  const { 
+    code, discount_type, value, min_fare_amount, max_discount_amount, 
+    usage_limit, expiry_date, is_active,
+    target_min_distance, target_min_rides, target_min_spend, target_app_age_days, is_public
+  } = req.body;
+  try {
+    const result = await pool.query(
+      `INSERT INTO promotions (
+        code, discount_type, value, min_fare_amount, max_discount_amount, 
+        usage_limit, expiry_date, is_active,
+        target_min_distance, target_min_rides, target_min_spend, target_app_age_days, is_public
+      )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+      [
+        code.toUpperCase(), discount_type, value, min_fare_amount || 0, max_discount_amount || null, 
+        usage_limit || null, expiry_date || null, is_active ?? true,
+        target_min_distance || 0, target_min_rides || 0, target_min_spend || 0, target_app_age_days || 0, is_public ?? false
+      ]
+    );
+    
+    await logAdminAction(req.user.id, `Admin ${req.user.name} created new coupon: ${code.toUpperCase()}`);
+    res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+    console.error("Create coupon error:", err);
+    if (err.code === '23505') return res.status(400).json({ message: "Coupon code already exists" });
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.put("/coupons/:id", authenticateAdmin, async (req: any, res: any) => {
+  const { id } = req.params;
+  const { 
+    code, discount_type, value, min_fare_amount, max_discount_amount, 
+    usage_limit, expiry_date, is_active,
+    target_min_distance, target_min_rides, target_min_spend, target_app_age_days, is_public
+  } = req.body;
+  try {
+    const result = await pool.query(
+      `UPDATE promotions 
+       SET code = $1, discount_type = $2, value = $3, min_fare_amount = $4, max_discount_amount = $5, 
+           usage_limit = $6, expiry_date = $7, is_active = $8,
+           target_min_distance = $9, target_min_rides = $10, target_min_spend = $11, target_app_age_days = $12, is_public = $13
+       WHERE promo_id = $14 RETURNING *`,
+      [
+        code.toUpperCase(), discount_type, value, min_fare_amount || 0, max_discount_amount || null, 
+        usage_limit || null, expiry_date || null, is_active ?? true,
+        target_min_distance || 0, target_min_rides || 0, target_min_spend || 0, target_app_age_days || 0, is_public ?? false,
+        id
+      ]
+    );
+    
+    if (result.rows.length === 0) return res.status(404).json({ message: "Coupon not found" });
+    
+    await logAdminAction(req.user.id, `Admin ${req.user.name} updated coupon: ${code.toUpperCase()}`);
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("Update coupon error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.delete("/coupons/:id", authenticateAdmin, async (req: any, res: any) => {
+  const { id } = req.params;
+  try {
+    const checkRes = await pool.query("SELECT code FROM promotions WHERE promo_id = $1", [id]);
+    if (checkRes.rows.length === 0) return res.status(404).json({ message: "Coupon not found" });
+    
+    const code = checkRes.rows[0].code;
+    await pool.query("DELETE FROM promotions WHERE promo_id = $1", [id]);
+    
+    await logAdminAction(req.user.id, `Admin ${req.user.name} deleted coupon: ${code}`);
+    res.json({ message: "Coupon deleted successfully" });
+  } catch (err) {
+    console.error("Delete coupon error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });

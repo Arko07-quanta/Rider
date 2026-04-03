@@ -38,6 +38,11 @@ export default function Rider() {
   const [vehicleTypes, setVehicleTypes] = useState<any[]>([]);
   const [selectedVehicleType, setSelectedVehicleType] = useState<string>('');
   const [shareCopied, setShareCopied] = useState(false);
+  const [couponCode, setCouponCode] = useState('');
+  const [discount, setDiscount] = useState(0);
+  const [couponError, setCouponError] = useState('');
+  const [showCouponModal, setShowCouponModal] = useState(false);
+  const [availableCoupons, setAvailableCoupons] = useState<any[]>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const locationSyncRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const selfLocationRef = useRef<{ lat: number, lng: number } | null>(null);
@@ -259,6 +264,19 @@ export default function Rider() {
     fetchVehicles();
   }, [fetchHistory]);
 
+  const fetchCoupons = useCallback(async () => {
+    try {
+      const { data } = await api.get('/api/rides/coupons');
+      setAvailableCoupons(data);
+    } catch (err) {
+      console.error('Failed to fetch coupons:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showCouponModal) fetchCoupons();
+  }, [showCouponModal, fetchCoupons]);
+
   const handleRouteCalculated = (dist: string, dur: string, distVal: number) => {
     setDistance(dist);
     setDuration(dur);
@@ -277,12 +295,15 @@ export default function Rider() {
         dropoff_lat: dropoff.lat,
         dropoff_lng: dropoff.lng,
         vehicle_type_id: selectedVehicleType,
-        distance_km: distanceKm
+        distance_km: distanceKm,
+        coupon_code: couponCode
       });
       setPickup(null);
       setDropoff(null);
       setDistance('');
       setDuration('');
+      setCouponCode('');
+      setDiscount(0);
       fetchHistory();
       setActiveTab('history');
     } catch (err: any) {
@@ -295,6 +316,39 @@ export default function Rider() {
       await api.delete(`/api/rides/cancel/${requestId}`);
       fetchHistory();
     } catch (_) { }
+  };
+ 
+  const handleApplyCoupon = async () => {
+    if (!couponCode) return;
+    setCouponError('');
+    
+    // Calculate current base fare for validation
+    const v = vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType));
+    if (!v) return;
+    
+    const calculatedFare = Number(v.base_fare) + (distanceKm * Number(v.fare_per_km));
+    const currentFare = Math.max(calculatedFare, Number(v.minimum_fare));
+
+    try {
+      const { data } = await api.post('/api/rides/validate-coupon', {
+        code: couponCode,
+        fare: currentFare
+      });
+      setDiscount(data.discount);
+      setCouponError('');
+    } catch (err: any) {
+      setCouponError(err.response?.data?.message || 'Invalid coupon');
+      setDiscount(0);
+    }
+  };
+
+  const selectCoupon = (code: string) => {
+    setCouponCode(code);
+    setShowCouponModal(false);
+    setTimeout(() => {
+      const applyBtn = document.getElementById('apply-coupon-btn');
+      if (applyBtn) applyBtn.click();
+    }, 100);
   };
 
   const mapOrigin = activeTab === 'book'
@@ -476,14 +530,61 @@ export default function Rider() {
                 </div>
                 
                 {selectedVehicleType && distanceKm > 0 && vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)) && (
-                  <div className="estimate-row" style={{ marginBottom: '20px', padding: '10px', background: '#e3f2fd', borderRadius: '6px' }}>
-                    <span className="estimate-label" style={{ color: '#1565c0', fontWeight: 'bold' }}>Estimated Fare:</span>
-                    <strong className="estimate-value" style={{ color: '#1565c0', fontSize: '1.2em' }}>
-                      ${Math.max(
-                        Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).minimum_fare),
-                        Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).base_fare) + (distanceKm * Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).fare_per_km))
-                      ).toFixed(2)}
-                    </strong>
+                  <div className="fare-breakdown" style={{ marginTop: '16px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+                    <div className="estimate-row">
+                      <span className="estimate-label">Original Fare:</span>
+                      <span className="estimate-value">
+                        ${Math.max(
+                          Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).minimum_fare),
+                          Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).base_fare) + (distanceKm * Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).fare_per_km))
+                        ).toFixed(2)}
+                      </span>
+                    </div>
+                    
+                    <div className="coupon-input-group" style={{ display: 'flex', gap: '8px', margin: '12px 0' }}>
+                      <input 
+                        type="text" 
+                        placeholder="Coupon Code" 
+                        value={couponCode}
+                        onChange={(e) => setCouponCode(e.target.value)}
+                        style={{ flex: 1, padding: '8px', borderRadius: '4px' }}
+                      />
+                      <button 
+                        id="apply-coupon-btn"
+                        onClick={handleApplyCoupon}
+                        className="btn-secondary"
+                        style={{ padding: '0 16px', fontSize: '13px' }}
+                      >
+                        Apply
+                      </button>
+                      <button 
+                         onClick={() => setShowCouponModal(true)}
+                         className="btn-secondary"
+                         style={{ padding: '0 12px', fontSize: '13px', background: 'var(--color-primary)', color: 'white', border: 'none' }}
+                         title="View My Coupons"
+                      >
+                        🎁
+                      </button>
+                    </div>
+                    
+                    {couponError && <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '-8px', marginBottom: '12px' }}>{couponError}</p>}
+                    
+                    {discount > 0 && (
+                      <div className="estimate-row" style={{ color: 'var(--color-primary)' }}>
+                        <span className="estimate-label" style={{ color: 'inherit' }}>Discount:</span>
+                        <strong className="estimate-value" style={{ color: 'inherit' }}>-${discount.toFixed(2)}</strong>
+                      </div>
+                    )}
+                    
+                    <div className="estimate-row" style={{ marginTop: '8px', padding: '12px', background: 'rgba(34, 197, 94, 0.1)', borderRadius: '8px' }}>
+                      <span className="estimate-label" style={{ fontWeight: '800', color: 'var(--text-main)' }}>Total to Pay:</span>
+                      <strong className="estimate-value" style={{ fontSize: '1.4em', color: 'var(--color-primary)' }}>
+                        ${(Math.max(
+                          Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).minimum_fare),
+                          Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).base_fare) + (distanceKm * Number(vehicleTypes.find(v => String(v.vehicle_type_id) === String(selectedVehicleType)).fare_per_km))
+                        ) - discount).toFixed(2)}
+                      </strong>
+                    </div>
                   </div>
                 )}
 
@@ -604,6 +705,51 @@ export default function Rider() {
           rideId={selectedHistoryRide.ride_id!}
           theirName={selectedHistoryRide.driver_name || 'Driver'}
         />
+      )}
+
+      {showCouponModal && (
+        <div className="modal-overlay animated fadeIn">
+          <div className="modal-box coupon-modal">
+            <div className="modal-header">
+              <h3>My Available Coupons</h3>
+              <button className="close-btn" onClick={() => setShowCouponModal(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              {availableCoupons.length === 0 ? (
+                <div className="no-coupons">
+                  <p>No coupons available right now.</p>
+                  <p className="sub-text">Keep riding to earn more rewards!</p>
+                </div>
+              ) : (
+                <div className="coupon-grid">
+                  {availableCoupons.map(coupon => (
+                    <div key={coupon.promo_id} className="coupon-item">
+                      <div className="coupon-type-badge">
+                        {coupon.discount_type === 'percentage' ? `${coupon.value}% OFF` : `$${coupon.value} OFF`}
+                      </div>
+                      <div className="coupon-main">
+                        <h4 className="coupon-code-text">{coupon.code}</h4>
+                        <p className="coupon-desc">
+                          {Number(coupon.min_fare_amount) > 0 ? `Min. fare $${coupon.min_fare_amount}` : 'No min. fare'}
+                          {coupon.max_discount_amount && ` • Max. $${coupon.max_discount_amount}`}
+                        </p>
+                        {coupon.expiry_date && (
+                          <p className="coupon-expiry">Expires: {new Date(coupon.expiry_date).toLocaleDateString()}</p>
+                        )}
+                      </div>
+                      <button 
+                        className="use-coupon-btn"
+                        onClick={() => selectCoupon(coupon.code)}
+                      >
+                        Select
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

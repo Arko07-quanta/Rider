@@ -84,17 +84,57 @@
 .ride-footer {
   border-top: 1px solid var(--border-color);
   padding-top: 12px;
-  font-size: 13px;
-  color: var(--text-secondary);
+}
+
+.ride-meta-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .person-info {
   display: flex;
   align-items: center;
   gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 .person-info strong {
   color: var(--text-main);
   font-weight: 700;
+}
+
+.fare-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.fare-item {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.fare-item.discount {
+  color: var(--color-primary);
+}
+
+.fare-item.total {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text-main);
+  margin-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  padding-top: 4px;
+}
+
+.fare-value {
+  min-width: 60px;
+  text-align: right;
 }

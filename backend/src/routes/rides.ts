@@ -25,8 +25,85 @@ router.get("/vehicle-types", authenticateToken, async (req: any, res: any) => {
   }
 });
 
+router.get("/coupons", authenticateToken, async (req: any, res: any) => {
+  const user_id = req.user.id;
+  try {
+    const result = await pool.query(
+      `SELECT p.*, COALESCE(uc.is_used, FALSE) as is_used, uc.earned_at
+       FROM promotions p
+       LEFT JOIN user_coupons uc ON p.promo_id = uc.promo_id AND uc.user_id = $1
+       WHERE p.is_active = TRUE 
+         AND (p.expiry_date >= CURRENT_DATE OR p.expiry_date IS NULL)
+         AND (
+           (p.is_public = TRUE AND (uc.is_used IS FALSE OR uc.is_used IS NULL))
+           OR 
+           (p.is_public = FALSE AND uc.user_id IS NOT NULL AND uc.is_used IS FALSE)
+         )
+       ORDER BY p.is_public DESC, p.expiry_date ASC NULLS LAST`,
+      [user_id]
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error("Get coupons error:", err);
+    res.status(500).json({ message: "Failed to fetch coupons" });
+  }
+});
+
+router.post("/validate-coupon", authenticateToken, async (req: any, res: any) => {
+  const { code, fare } = req.body;
+  const user_id = req.user.id;
+
+  try {
+    const promoRes = await pool.query(
+      `SELECT p.*, uc.is_used 
+       FROM promotions p
+       LEFT JOIN user_coupons uc ON p.promo_id = uc.promo_id AND uc.user_id = $1
+       WHERE p.code = $2 AND p.is_active = TRUE AND (p.expiry_date >= CURRENT_DATE OR p.expiry_date IS NULL)`,
+      [user_id, code]
+    );
+
+    if (promoRes.rows.length === 0) {
+      return res.status(404).json({ message: "Invalid or expired coupon code" });
+    }
+
+    const promo = promoRes.rows[0];
+
+    // Check if user has the coupon and if it's already used
+    if (promo.is_used) {
+      return res.status(400).json({ message: "Coupon already used" });
+    }
+
+    // Check minimum fare
+    if (fare < Number(promo.min_fare_amount)) {
+      return res.status(400).json({ 
+        message: `Minimum fare of $${promo.min_fare_amount} required for this coupon` 
+      });
+    }
+
+    let discount = 0;
+    if (promo.discount_type === 'percentage') {
+      discount = (fare * Number(promo.value)) / 100;
+      if (promo.max_discount_amount) {
+        discount = Math.min(discount, Number(promo.max_discount_amount));
+      }
+    } else {
+      discount = Number(promo.value);
+    }
+
+    res.json({
+      promo_id: promo.promo_id,
+      discount: Number(discount.toFixed(2)),
+      final_fare: Number((fare - discount).toFixed(2))
+    });
+
+  } catch (err) {
+    console.error("Validate coupon error:", err);
+    res.status(500).json({ message: "Failed to validate coupon" });
+  }
+});
+
 router.post("/request", authenticateToken, async (req: any, res: any) => {
-  const { pickup_address, dropoff_address, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, vehicle_type_id, distance_km } = req.body;
+  const { pickup_address, dropoff_address, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, vehicle_type_id, distance_km, coupon_code } = req.body;
   if (!vehicle_type_id) {
     return res.status(400).json({ message: "vehicle_type_id is required" });
   }
@@ -35,9 +112,6 @@ router.post("/request", authenticateToken, async (req: any, res: any) => {
 
   try {
     await client.query("BEGIN");
-    console.log(rider_id);
-
-    // Removed block that cancelled existing pending requests to allow multiple concurrent requests
 
     const pickupLocId = await insertLocation(client, pickup_lat, pickup_lng, pickup_address);
     const dropoffLocId = await insertLocation(client, dropoff_lat, dropoff_lng, dropoff_address);
@@ -51,6 +125,35 @@ router.post("/request", authenticateToken, async (req: any, res: any) => {
       fare = Math.max(calculatedFare, Number(v.minimum_fare));
     }
 
+    let discount_amount = 0;
+    let promo_id = null;
+
+    if (coupon_code) {
+      const promoRes = await client.query(
+        `SELECT p.* FROM promotions p
+         LEFT JOIN user_coupons uc ON p.promo_id = uc.promo_id AND uc.user_id = $1
+         WHERE p.code = $2 AND (uc.is_used IS FALSE OR uc.is_used IS NULL) 
+         AND p.is_active = TRUE AND (p.expiry_date >= CURRENT_DATE OR p.expiry_date IS NULL)
+         AND (p.is_public = TRUE OR uc.user_id IS NOT NULL)`,
+        [rider_id, coupon_code]
+      );
+
+      if (promoRes.rows.length > 0) {
+        const promo = promoRes.rows[0];
+        if (fare >= Number(promo.min_fare_amount)) {
+          promo_id = promo.promo_id;
+          if (promo.discount_type === 'percentage') {
+            discount_amount = (fare * Number(promo.value)) / 100;
+            if (promo.max_discount_amount) {
+              discount_amount = Math.min(discount_amount, Number(promo.max_discount_amount));
+            }
+          } else {
+            discount_amount = Number(promo.value);
+          }
+        }
+      }
+    }
+
     const reqResult = await client.query(
       `INSERT INTO ride_requests (rider_id, vehicle_type_id, status) VALUES ($1, $2, 'pending') RETURNING request_id`,
       [rider_id, vehicle_type_id]
@@ -58,13 +161,25 @@ router.post("/request", authenticateToken, async (req: any, res: any) => {
     const request_id = reqResult.rows[0].request_id;
 
     await client.query(
-      `INSERT INTO rides (request_id, driver_id, pickup_location_id, dropoff_location_id, status, distance, fare)
-       VALUES ($1, NULL, $2, $3, 'ongoing', $4, $5)`,
-      [request_id, pickupLocId, dropoffLocId, distance_km || 0, fare]
+      `INSERT INTO rides (request_id, driver_id, pickup_location_id, dropoff_location_id, status, distance, fare, applied_promo_id, discount_amount)
+       VALUES ($1, NULL, $2, $3, 'ongoing', $4, $5, $6, $7)`,
+      [request_id, pickupLocId, dropoffLocId, distance_km || 0, fare, promo_id, discount_amount]
     );
 
+    // If a coupon was applied, mark it as used immediately to prevent double usage 
+    // (though in some systems you'd mark it used only upon completion, 
+    // here we mark it at request but should revert if cancelled)
+    if (promo_id) {
+       await client.query(
+         `INSERT INTO user_coupons (user_id, promo_id, is_used) 
+          VALUES ($1, $2, TRUE)
+          ON CONFLICT (user_id, promo_id) DO UPDATE SET is_used = TRUE`, 
+         [rider_id, promo_id]
+       );
+    }
+
     await client.query("COMMIT");
-    res.status(201).json({ request_id, status: "pending" });
+    res.status(201).json({ request_id, status: "pending", discount: discount_amount, final_fare: fare - discount_amount });
   } catch (err: any) {
     await client.query("ROLLBACK");
     console.error("Ride request error:", err);
@@ -90,6 +205,7 @@ router.get("/my-requests", authenticateToken, async (req: any, res: any) => {
           r.ride_id,
           r.distance,
           r.fare,
+          r.discount_amount,
           u_driver.name AS driver_name,
           u_driver.phone AS driver_phone
        FROM ride_requests rq
@@ -315,7 +431,7 @@ router.post("/complete/:rideId", authenticateToken, async (req: any, res: any) =
     await client.query("BEGIN");
 
     const rideRes = await client.query(
-      `SELECT r.status, r.fare, rq.rider_id 
+      `SELECT r.status, r.fare, r.discount_amount, rq.rider_id 
        FROM rides r 
        JOIN ride_requests rq ON r.request_id = rq.request_id
        WHERE r.ride_id = $1 AND r.driver_id = $2 FOR UPDATE`,
@@ -332,7 +448,7 @@ router.post("/complete/:rideId", authenticateToken, async (req: any, res: any) =
        return res.status(400).json({ message: "Ride is not ongoing" });
     }
 
-    const { fare, rider_id } = rideRes.rows[0];
+    const { fare, discount_amount, rider_id } = rideRes.rows[0];
 
     await client.query(
       `UPDATE rides SET status = 'completed', end_time = NOW(), updated_at = NOW()
@@ -353,12 +469,16 @@ router.post("/complete/:rideId", authenticateToken, async (req: any, res: any) =
        }
        const d_wallet_id = driverWallet.rows[0].wallet_id;
 
-       await client.query(`UPDATE wallets SET balance = balance - $1, updated_at = NOW() WHERE wallet_id = $2`, [fare, r_wallet_id]);
+       // Rider pays (Original Fare - Discount)
+       const finalRiderCost = Number(fare) - Number(discount_amount || 0);
+
+       await client.query(`UPDATE wallets SET balance = balance - $1, updated_at = NOW() WHERE wallet_id = $2`, [finalRiderCost, r_wallet_id]);
        await client.query(
          `INSERT INTO transactions (wallet_id, ride_id, type, amount, status, payment_method) VALUES ($1, $2, 'debit', $3, 'completed', 'Wallet')`,
-         [r_wallet_id, rideId, fare]
+         [r_wallet_id, rideId, finalRiderCost]
        );
 
+       // Driver gets full Original Fare
        await client.query(`UPDATE wallets SET balance = balance + $1, updated_at = NOW() WHERE wallet_id = $2`, [fare, d_wallet_id]);
        await client.query(
          `INSERT INTO transactions (wallet_id, ride_id, type, amount, status, payment_method) VALUES ($1, $2, 'credit', $3, 'completed', 'Wallet')`,

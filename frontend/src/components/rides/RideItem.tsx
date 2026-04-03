@@ -14,6 +14,7 @@ export interface RideData {
   dropoff_lng?: number | string | null;
   distance?: number | string | null;
   fare?: number | string | null;
+  discount_amount?: number | string | null;
   driver_name?: string | null;
   driver_phone?: string | null;
   rider_name?: string | null;
@@ -64,11 +65,32 @@ export default function RideItem({ ride, showRider, onClick, active }: RideItemP
       </div>
 
       <div className="ride-footer">
-        {showRider ? (
-          <div className="person-info">👤 Rider: <strong>{ride.rider_name || 'Anonymous'}</strong></div>
-        ) : (
-          <div className="person-info">🚗 Driver: <strong>{ride.driver_name || 'Searching...'}</strong></div>
-        )}
+        <div className="ride-meta-info">
+          {showRider ? (
+            <div className="person-info">👤 Rider: <strong>{ride.rider_name || 'Anonymous'}</strong></div>
+          ) : (
+            <div className="person-info">🚗 Driver: <strong>{ride.driver_name || 'Searching...'}</strong></div>
+          )}
+          
+          {ride.fare && Number(ride.fare) > 0 && (
+            <div className="fare-info">
+              <div className="fare-item">
+                <span className="fare-label">Fare:</span>
+                <span className="fare-value">${Number(ride.fare).toFixed(2)}</span>
+              </div>
+              {ride.discount_amount && Number(ride.discount_amount) > 0 && (
+                <div className="fare-item discount">
+                  <span className="fare-label">Discount:</span>
+                  <span className="fare-value">-${Number(ride.discount_amount).toFixed(2)}</span>
+                </div>
+              )}
+              <div className="fare-item total">
+                <span className="fare-label">Total:</span>
+                <span className="fare-value">${(Number(ride.fare) - Number(ride.discount_amount || 0)).toFixed(2)}</span>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
