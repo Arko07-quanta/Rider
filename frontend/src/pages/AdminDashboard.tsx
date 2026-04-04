@@ -52,7 +52,7 @@ export default function AdminDashboard() {
   const handleVerifiedToday = async () => {
     try {
       const res = await api.get("api/admin/verified-today");
-      setVerifiedToday(res.data.rows[0].count);
+      setVerifiedToday(res.data[0].count);
     } catch (err) {
       console.error("Failed to fetch verified today");
     }
