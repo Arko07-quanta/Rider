@@ -44,7 +44,8 @@ router.post("/signup", async (req: Request, res: Response) => {
     await client.query('COMMIT');
 
     const token = generateToken({ id: userId, role: userRole, version: tokenVersion });
-    setAuthCookies(res, token, userRole);
+    const adminLevel = userRole === 'admin' ? 1 : 0; // Default for signup — super admin is seeded
+    setAuthCookies(res, token, userRole, adminLevel);
 
     res.status(201).json({ user: { id: userId, role: userRole, name } });
   } catch (err: any) {
@@ -87,8 +88,14 @@ router.post("/login", async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Driver not verified" });
     }
 
+    let access_level = 0;
+    if (user.role === 'admin') {
+      const adminRes = await pool.query("SELECT access_level FROM admins WHERE user_id = $1", [user.user_id]);
+      access_level = adminRes.rows[0]?.access_level ?? 0;
+    }
+
     const token = generateToken({ id: user.user_id, role: user.role, version: user.token_version });
-    setAuthCookies(res, token, user.role);
+    setAuthCookies(res, token, user.role, access_level);
 
     res.json({ 
       message: "Login successful", 

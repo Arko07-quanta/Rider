@@ -8,7 +8,7 @@ export const generateToken = (payload: object): string => {
   return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "1d" });
 };
 
-export const setAuthCookies = (res: Response, token: string, role: string, expireMs: number = 24 * 60 * 60 * 1000): void => {
+export const setAuthCookies = (res: Response, token: string, role: string, access_level: number = 0, expireMs: number = 24 * 60 * 60 * 1000): void => {
   const cookieOptions = {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -17,7 +17,7 @@ export const setAuthCookies = (res: Response, token: string, role: string, expir
   };
 
   res.cookie("token", token, cookieOptions);
-  res.cookie("auth_info", JSON.stringify({ role, exp: Date.now() + expireMs }), { 
+  res.cookie("auth_info", JSON.stringify({ role, access_level, exp: Date.now() + expireMs }), { 
     ...cookieOptions, 
     httpOnly: false // Accessible by frontend logic
   });

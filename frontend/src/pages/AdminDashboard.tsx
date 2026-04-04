@@ -9,12 +9,18 @@ import SystemLogsPanel from "../components/admin/SystemLogsPanel";
 import DashboardInsightsPanel from "../components/admin/DashboardInsightsPanel";
 import AnalyticsPanel from "../components/admin/AnalyticsPanel";
 import PromotionsPanel from "../components/admin/PromotionsPanel";
+import TripReplayPanel from "../components/admin/TripReplayPanel";
+import AdminControlPanel from "../components/admin/AdminControlPanel";
+import Cookies from "js-cookie";
 
 export default function AdminDashboard() {
   const [activePanel, setActivePanel] = useState("insights");
   const [drivers, setDrivers] = useState<PendingDriver[]>([]);
   const [loading, setLoading] = useState(true);
   const [verifiedToday, setVerifiedToday] = useState(0);
+
+  const authInfo = Cookies.get("auth_info");
+  const accessLevel = authInfo ? JSON.parse(authInfo).access_level : 0;
 
   const fetchQueue = async () => {
     try {
@@ -99,6 +105,16 @@ export default function AdminDashboard() {
             className={`nav-item ${activePanel === "promotions" ? "active" : ""}`}
             onClick={() => setActivePanel("promotions")}
           >Promotions & Coupons</button>
+          <button
+            className={`nav-item ${activePanel === "replay" ? "active" : ""}`}
+            onClick={() => setActivePanel("replay")}
+          >Trip Replay</button>
+          {accessLevel >= 1 && (
+            <button
+              className={`nav-item ${activePanel === "admin_control" ? "active" : ""}`}
+              onClick={() => setActivePanel("admin_control")}
+            >Admin Control</button>
+          )}
         </nav>
       </aside>
 
@@ -108,9 +124,11 @@ export default function AdminDashboard() {
             {activePanel === "verification" ? "Verification Desk" : 
              activePanel === "insights" ? "System Intelligence" : 
              activePanel === "promotions" ? "Marketing & Rewards" :
+             activePanel === "replay" ? "Trip Replay Gallery" :
+             activePanel === "admin_control" ? "Admin Oversight" :
              "Management Console"}
           </h1>
-          <div className="user-profile">Admin Status: SYSTEM_OPERATOR</div>
+          <div className="user-profile">Admin Level: {accessLevel}</div>
         </header>
 
         <section className="stats-grid">
@@ -139,6 +157,8 @@ export default function AdminDashboard() {
           {activePanel === "logs" && <SystemLogsPanel />}
           {activePanel === "analytics" && <AnalyticsPanel />}
           {activePanel === "promotions" && <PromotionsPanel />}
+          {activePanel === "replay" && <TripReplayPanel />}
+          {activePanel === "admin_control" && <AdminControlPanel access_level={accessLevel} />}
         </div>
       </main>
     </div>
