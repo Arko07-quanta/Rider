@@ -58,6 +58,38 @@
   transform: rotate(180deg);
 }
 
+.avatar-circle {
+  width: 34px;
+  height: 34px;
+  background: var(--bg-secondary);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+}
+
+.profile-info-mini {
+  display: flex;
+  flex-direction: column;
+}
+
+.rating-mini {
+  font-size: 10px;
+  color: #FACC15;
+  font-weight: 800;
+  margin-top: 1px;
+}
+
+.no-rating-mini {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 700;
+  margin-top: 1px;
+}
+
 .chat-body {
   display: flex;
   flex-direction: column;

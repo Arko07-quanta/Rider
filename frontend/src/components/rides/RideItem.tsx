@@ -1,5 +1,4 @@
-import { useState } from 'react';
-import ReviewModal from '../reviews/ReviewModal';
+import { forwardRef } from 'react';
 import './RideItem.css';
 
 export interface RideData {
@@ -32,16 +31,7 @@ interface RideItemProps {
   active?: boolean;
 }
 
-export default function RideItem({ ride, showRider, onClick, active }: RideItemProps) {
-  const [profileUserId, setProfileUserId] = useState<number | null>(null);
-
-  const isCompleted = ride.ride_status === 'completed';
-
-  const handleProfileClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const uid = showRider ? ride.rider_id : ride.driver_user_id;
-    if (uid) setProfileUserId(uid);
-  };
+const RideItem = forwardRef<HTMLDivElement, RideItemProps>(({ ride, showRider, onClick, active }, ref) => {
   const getStatusLabel = () => {
     if (ride.request_status === 'pending') return 'Pending';
     if (ride.request_status === 'cancelled') return 'Cancelled';
@@ -61,7 +51,7 @@ export default function RideItem({ ride, showRider, onClick, active }: RideItemP
   };
 
   return (
-    <div className={`ride-item-card ${active ? 'active' : ''}`} onClick={() => onClick?.(ride)}>
+    <div ref={ref} className={`ride-item-card ${active ? 'active' : ''}`} onClick={() => onClick?.(ride)}>
       <div className="ride-header">
         <span className={getStatusClass()}>{getStatusLabel()}</span>
         <span className="ride-date">{new Date(ride.created_at).toLocaleDateString()}</span>
@@ -93,50 +83,19 @@ export default function RideItem({ ride, showRider, onClick, active }: RideItemP
           ) : (
             <div className="person-info">🚗 Driver: <strong>{ride.driver_name || 'Searching...'}</strong></div>
           )}
-
-          {isCompleted && (showRider ? ride.rider_id : ride.driver_user_id) && (
-            <button
-              onClick={handleProfileClick}
-              title="View profile & reviews"
-              style={{
-                background: 'none', border: '1px solid #374151', borderRadius: '6px',
-                cursor: 'pointer', fontSize: '13px', color: '#9ca3af',
-                padding: '3px 8px', marginLeft: '8px',
-              }}
-            >
-              👤 Profile
-            </button>
-          )}
           
           {ride.fare && Number(ride.fare) > 0 && (
             <div className="fare-info">
               <div className="fare-item">
-                <span className="fare-label">Fare:</span>
-                <span className="fare-value">${Number(ride.fare).toFixed(2)}</span>
-              </div>
-              {ride.discount_amount && Number(ride.discount_amount) > 0 && (
-                <div className="fare-item discount">
-                  <span className="fare-label">Discount:</span>
-                  <span className="fare-value">-${Number(ride.discount_amount).toFixed(2)}</span>
-                </div>
-              )}
-              <div className="fare-item total">
-                <span className="fare-label">Total:</span>
+                <span className="fare-label">Total Fare:</span>
                 <span className="fare-value">${(Number(ride.fare) - Number(ride.discount_amount || 0)).toFixed(2)}</span>
               </div>
             </div>
           )}
         </div>
       </div>
-
-      {profileUserId != null && ride.ride_id != null && (
-        <ReviewModal
-          userId={profileUserId}
-          rideId={ride.ride_id}
-          rideStatus={ride.ride_status ?? undefined}
-          onClose={() => setProfileUserId(null)}
-        />
-      )}
     </div>
   );
-}
+});
+
+export default RideItem;

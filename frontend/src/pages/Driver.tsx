@@ -62,6 +62,8 @@ export default function Driver() {
   const [accepting, setAccepting] = useState<number | null>(null);
   const [selfLocation, setSelfLocation] = useState<{lat: number, lng: number} | null>(null);
   const [viewingRiderId, setViewingRiderId] = useState<number | null>(null);
+  const [reviewRideData, setReviewRideData] = useState<{userId: number, rideId: number} | null>(null);
+  const activeRideRef = useRef<ActiveRide | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -121,9 +123,24 @@ export default function Driver() {
     }
   }, []);
 
+  useEffect(() => { activeRideRef.current = activeRide; }, [activeRide]);
+
+  const syncActiveRide = useCallback((socket: Socket) => {
+    if (!socket || !socket.connected) return;
+    const ride = activeRideRef.current;
+    if (ride?.request_id) {
+       socket.emit('join_request', ride.request_id);
+    }
+  }, []);
+
   useEffect(() => {
-    socketRef.current = io(api.defaults.baseURL || '', {
-      auth: { token: localStorage.getItem('token') }
+    const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:4000', { 
+      withCredentials: true 
+    });
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      syncActiveRide(socket);
     });
 
     pollActiveRide().then(() => {
@@ -135,9 +152,15 @@ export default function Driver() {
 
     return () => {
       stopPolling();
-      socketRef.current?.disconnect();
+      socket.disconnect();
     };
-  }, [pollActiveRide, pollPendingRequests, stopPolling, fetchHistory, fetchWallet]);
+  }, [pollActiveRide, pollPendingRequests, stopPolling, fetchHistory, fetchWallet, syncActiveRide]);
+
+  useEffect(() => {
+    if (socketRef.current?.connected) {
+      syncActiveRide(socketRef.current);
+    }
+  }, [activeRide, syncActiveRide]);
 
   useEffect(() => {
     if (activeRide?.request_id && socketRef.current) {
@@ -146,6 +169,14 @@ export default function Driver() {
 
       socket.on('ride_status_update', (data: any) => {
         if (data.status === 'cancelled' || data.status === 'searching') {
+          setPhase('searching');
+          setActiveRide(null);
+          fetchHistory();
+          if (!pollRef.current) {
+            pollRef.current = setInterval(pollPendingRequests, 4000);
+          }
+        } else if (data.status === 'completed' && data.ride_id && data.rider_id) {
+          setReviewRideData({ userId: data.rider_id, rideId: data.ride_id });
           setPhase('searching');
           setActiveRide(null);
           fetchHistory();
@@ -223,7 +254,9 @@ export default function Driver() {
   const handleComplete = async () => {
     if (!activeRide) return;
     try {
-      await api.post(`/api/rides/complete/${activeRide.ride_id}`);
+      const { ride_id, rider_id } = activeRide;
+      await api.post(`/api/rides/complete/${ride_id}`);
+      setReviewRideData({ userId: rider_id, rideId: ride_id });
       setActiveRide(null);
       setPhase('searching');
       setRequests([]);
@@ -401,9 +434,23 @@ export default function Driver() {
                         <button 
                           className="btn-profile-preview"
                           onClick={() => setViewingRiderId(selectedPreview.rider_id)}
-                          style={{ padding: '4px 10px', fontSize: '0.8em', borderRadius: '15px' }}
+                          style={{ 
+                            background: 'rgba(255,255,255,0.05)', 
+                            border: '1px solid rgba(255,255,255,0.1)', 
+                            cursor: 'pointer', 
+                            fontSize: '16px', 
+                            width: '32px', 
+                            height: '32px', 
+                            borderRadius: '50%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#94a3b8',
+                            transition: 'all 0.2s'
+                          }}
+                          title="View reviews"
                         >
-                          👤 View Reviews
+                          👤
                         </button>
                       </p>
                       <div className="preview-stats" style={{ display: 'flex', gap: '15px', margin: '15px 0', padding: '16px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -505,6 +552,15 @@ export default function Driver() {
         <ReviewModal 
           userId={viewingRiderId} 
           onClose={() => setViewingRiderId(null)}
+        />
+      )}
+
+      {reviewRideData && (
+        <ReviewModal
+          userId={reviewRideData.userId}
+          rideId={reviewRideData.rideId}
+          rideStatus="completed"
+          onClose={() => setReviewRideData(null)}
         />
       )}
     </div>

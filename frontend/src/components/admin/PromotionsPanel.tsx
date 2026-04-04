@@ -55,6 +55,18 @@ export default function PromotionsPanel() {
     fetchPromotions();
   }, []);
 
+  useEffect(() => {
+    if (!showModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowModal(false);
+        setEditingPromo(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showModal]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {

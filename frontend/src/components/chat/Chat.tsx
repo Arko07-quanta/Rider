@@ -25,7 +25,16 @@ export default function Chat({ rideId, theirName, theirUserId, rideStatus }: Cha
   const [newMessage, setNewMessage] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [avgRating, setAvgRating] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (theirUserId) {
+      api.get(`/api/rides/profile/${theirUserId}`).then(({ data }) => {
+        setAvgRating(data.avg_rating);
+      }).catch(err => console.error('Error fetching rating', err));
+    }
+  }, [theirUserId]);
 
   useEffect(() => {
     let socket: Socket;
@@ -87,17 +96,29 @@ export default function Chat({ rideId, theirName, theirUserId, rideStatus }: Cha
   return (
     <div className={`chat-widget ${isOpen ? 'open' : 'closed'}`}>
       <div className="chat-header">
-        <div className="chat-header-left" onClick={() => setIsOpen(!isOpen)} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-          <h4 style={{ margin: 0 }}>💬 Chat with {theirName}</h4>
+        <div
+          className="chat-header-profile"
+          onClick={() => setShowProfile(true)}
+          title={`View ${theirName}'s profile & reviews`}
+          style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}
+        >
+          <div className="avatar-circle">👤</div>
+          <div className="profile-info-mini">
+            <h4 style={{ margin: 0, fontSize: '14px' }}>{theirName}</h4>
+            {avgRating ? (
+              <div className="rating-mini">⭐ {avgRating}</div>
+            ) : (
+              <div className="no-rating-mini">New User</div>
+            )}
+          </div>
+        </div>
+        <div 
+          className="chat-header-toggle" 
+          onClick={() => setIsOpen(!isOpen)}
+          style={{ padding: '8px', cursor: 'pointer', transition: 'var(--transition)' }}
+        >
           <span className="toggle-icon">{isOpen ? '▼' : '▲'}</span>
         </div>
-        {theirUserId && (
-          <button
-            onClick={(e) => { e.stopPropagation(); setShowProfile(true); }}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', padding: '0 4px' }}
-            title={`View ${theirName}'s profile`}
-          >👤</button>
-        )}
       </div>
 
       {showProfile && theirUserId && (

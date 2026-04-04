@@ -7,6 +7,7 @@ import RouteMap from '../components/map/RouteMap';
 import RideItem, { type RideData } from '../components/rides/RideItem';
 import Chat from '../components/chat/Chat';
 import api from '../api/axios';
+import ReviewModal from '../components/reviews/ReviewModal';
 
 type Phase = 'idle' | 'pending' | 'matched';
 
@@ -45,9 +46,14 @@ export default function Rider() {
   const [showCouponModal, setShowCouponModal] = useState(false);
   const [availableCoupons, setAvailableCoupons] = useState<any[]>([]);
   const [matchNotification, setMatchNotification] = useState<{ name: string, rideId: number } | null>(null);
+  const [reviewRideData, setReviewRideData] = useState<{userId: number, rideId: number} | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const locationSyncRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const selfLocationRef = useRef<{ lat: number, lng: number } | null>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const requestsRef = useRef<any[]>([]);
+  const lastHandledReviewRideId = useRef<number | null>(null);
+  const newRequestRef = useRef<number | null>(null);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -88,8 +94,10 @@ export default function Rider() {
     try {
       const { data } = await api.get('/api/rides/my-requests');
       setRequests(data);
+      return data;
     } catch (err) {
       console.error('Failed to fetch history:', err);
+      return [];
     }
   }, []);
 
@@ -131,19 +139,29 @@ export default function Rider() {
 
   useEffect(() => { selfLocationRef.current = selfLocation; }, [selfLocation]);
 
-  useEffect(() => {
-    let socket: Socket;
-    socket = io('http://localhost:4000', { withCredentials: true });
-    
-    socket.on('connect', () => {
-      requests.forEach(req => {
-        socket.emit("join_request", req.request_id);
-        if (req.ride_id) {
-          socket.emit("join_ride", req.ride_id);
-        }
-      });
-    });
+  useEffect(() => { requestsRef.current = requests; }, [requests]);
 
+  const syncRooms = useCallback((socket: Socket) => {
+    if (!socket || !socket.connected) return;
+    const reqs = requestsRef.current;
+    reqs.forEach(req => {
+      socket.emit("join_request", req.request_id);
+      if (req.ride_id) {
+        socket.emit("join_ride", req.ride_id);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:4000', { 
+      withCredentials: true 
+    });
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      syncRooms(socket);
+    });
+    
     socket.on("ride_status_update", (data: any) => {
       fetchHistory();
       if (data.status === 'accepted') {
@@ -151,15 +169,73 @@ export default function Rider() {
           name: data.driver_name || 'A driver', 
           rideId: data.ride_id 
         });
-        // Auto-clear after 10 seconds
         setTimeout(() => setMatchNotification(null), 10000);
+      } else if (data.status === 'completed' && data.ride_id && data.driver_id) {
+        setReviewRideData({ userId: data.driver_id, rideId: data.ride_id });
+        lastHandledReviewRideId.current = data.ride_id;
       }
     });
 
     return () => {
       socket.disconnect();
     };
-  }, [requests, fetchHistory]);
+  }, [fetchHistory, syncRooms]);
+
+  useEffect(() => {
+    if (socketRef.current?.connected) {
+      syncRooms(socketRef.current);
+    }
+  }, [requests, syncRooms]);
+
+  // Redundancy Trigger for Review Modal (if socket event is missed)
+  useEffect(() => {
+    const checkAndShowReviewModal = async () => {
+      const completedRide = requests.find(r => r.ride_status === 'completed' && r.ride_id && r.driver_user_id);
+      if (!completedRide || !completedRide.ride_id || !completedRide.driver_user_id || reviewRideData) {
+        return;
+      }
+      
+      // Check if we've already shown the modal for this ride this session
+      if (completedRide.ride_id === lastHandledReviewRideId.current) {
+        return;
+      }
+      
+      // Check if the ride was already reviewed on the server
+      try {
+        const url = `/api/rides/profile/${completedRide.driver_user_id}?rideId=${completedRide.ride_id}`;
+        const { data } = await api.get(url);
+        
+        // Only show modal if the user hasn't reviewed this ride yet
+        if (!data.has_reviewed) {
+          setReviewRideData({ userId: completedRide.driver_user_id, rideId: completedRide.ride_id });
+          lastHandledReviewRideId.current = completedRide.ride_id;
+        }
+      } catch (err) {
+        console.error('Failed to check review status:', err);
+      }
+    };
+    
+    checkAndShowReviewModal();
+  }, [requests, reviewRideData]);
+
+  // Scroll to new request when it appears (with delay for DOM render)
+  useEffect(() => {
+    if (newRequestRef.current) {
+      const targetId = newRequestRef.current;
+      newRequestRef.current = null;
+      // Small delay to allow React to render the history tab
+      setTimeout(() => {
+        const element = document.getElementById(`ride-item-${targetId}`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // Flash animation to draw attention
+          element.style.transition = 'box-shadow 0.3s ease';
+          element.style.boxShadow = '0 0 0 2px var(--color-primary)';
+          setTimeout(() => { element.style.boxShadow = ''; }, 2000);
+        }
+      }, 300);
+    }
+  }, [requests, activeTab]);
 
   useEffect(() => {
     const isActive = phase === 'pending' || phase === 'matched';
@@ -287,6 +363,15 @@ export default function Rider() {
     if (showCouponModal) fetchCoupons();
   }, [showCouponModal, fetchCoupons]);
 
+  useEffect(() => {
+    if (!showCouponModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowCouponModal(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showCouponModal]);
+
   const handleRouteCalculated = (dist: string, dur: string, distVal: number, durVal: number) => {
     setDistance(dist);
     setDuration(dur);
@@ -317,8 +402,14 @@ export default function Rider() {
       setCouponCode('');
       setDiscount(0);
       setDurationMin(0);
-      fetchHistory();
+      const data = await fetchHistory();
       setActiveTab('history');
+      // Auto-select and scroll to the newest request
+      if (data.length > 0) {
+        const newest = data[0];
+        setSelectedHistoryRide(newest);
+        newRequestRef.current = newest.request_id;
+      }
     } catch (err: any) {
       setStatusMsg(err.response?.data?.message || 'Failed to request ride');
     }
@@ -659,12 +750,13 @@ const hasInsufficientBalance = wallet ? Number(wallet.balance) < Number(estimate
                 <div className="request-list">
                   {running.length === 0 ? <p className="no-activity">No active requests.</p> :
                     running.map(req => (
-                      <RideItem
-                        key={req.request_id}
-                        ride={req}
-                        onClick={() => setSelectedHistoryRide(req)}
-                        active={selectedHistoryRide?.request_id === req.request_id}
-                      />
+                      <div key={req.request_id} id={`ride-item-${req.request_id}`}>
+                        <RideItem
+                          ride={req}
+                          onClick={() => setSelectedHistoryRide(req)}
+                          active={selectedHistoryRide?.request_id === req.request_id}
+                        />
+                      </div>
                     ))
                   }
                 </div>
@@ -800,6 +892,15 @@ const hasInsufficientBalance = wallet ? Number(wallet.balance) < Number(estimate
             Dismiss
           </button>
         </div>
+      )}
+
+      {reviewRideData && (
+        <ReviewModal
+          userId={reviewRideData.userId}
+          rideId={reviewRideData.rideId}
+          rideStatus="completed"
+          onClose={() => setReviewRideData(null)}
+        />
       )}
     </div>
   );

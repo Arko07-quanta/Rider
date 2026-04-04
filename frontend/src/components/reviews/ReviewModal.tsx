@@ -34,11 +34,19 @@ function StarRating({ value, onChange }: { value: number; onChange?: (v: number)
           key={star}
           onMouseEnter={() => onChange && setHovered(star)}
           onMouseLeave={() => onChange && setHovered(0)}
-          onClick={() => onChange?.(star)}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onChange) {
+              onChange(star);
+            }
+          }}
           style={{
             color: star <= (hovered || value) ? '#FACC15' : '#4b5563',
-            transition: 'color 0.15s',
+            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
             userSelect: 'none',
+            transform: hovered === star ? 'scale(1.2)' : 'scale(1)',
+            display: 'inline-block',
+            padding: '0 2px'
           }}
         >
           ★
@@ -76,6 +84,14 @@ export default function ReviewModal({ userId, rideId, rideStatus, onClose }: Rev
     fetchProfile();
   }, [userId, rideId]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   const handleSubmitReview = async () => {
     if (!rideId || rating === 0) return;
     setError('');
@@ -107,48 +123,39 @@ export default function ReviewModal({ userId, rideId, rideStatus, onClose }: Rev
           borderRadius: '16px', padding: '28px', width: '100%', maxWidth: '440px',
           maxHeight: '85vh', overflowY: 'auto',
           boxShadow: '0 25px 50px rgba(0,0,0,0.6)',
+          position: 'relative'
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h3 style={{ margin: 0, color: '#fff', fontSize: '18px', fontWeight: 800 }}>👤 Profile</h3>
-          <button
-            onClick={onClose}
-            style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', fontSize: '20px', lineHeight: 1 }}
-          >✕</button>
-        </div>
-
         {loading ? (
-          <div style={{ textAlign: 'center', color: '#9ca3af', padding: '40px 0' }}>Loading profile...</div>
+          <div style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>Loading profile...</div>
         ) : !profile ? (
-          <div style={{ textAlign: 'center', color: '#ef4444', padding: '40px 0' }}>Failed to load profile.</div>
+          <div style={{ padding: '40px', textAlign: 'center', color: '#ef4444' }}>Failed to load profile.</div>
         ) : (
           <>
-            {/* Profile Info */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: '16px',
-              background: 'rgba(255,255,255,0.04)', borderRadius: '12px', padding: '16px', marginBottom: '20px',
-            }}>
-              <div style={{
-                width: '52px', height: '52px', borderRadius: '50%',
-                background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '22px', flexShrink: 0,
-              }}>
-                {profile.role === 'driver' ? '🚗' : '🧑'}
-              </div>
-              <div>
-                <div style={{ color: '#fff', fontWeight: 800, fontSize: '17px' }}>{profile.name}</div>
-                <div style={{ color: '#9ca3af', fontSize: '13px', textTransform: 'capitalize', marginBottom: '4px' }}>{profile.role}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+              <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 900, color: '#fff', letterSpacing: '-0.5px' }}>
+                {canReview ? `Rate ${profile.name}` : `${profile.name}'s Profile`}
+              </h2>
+              <button 
+                onClick={onClose}
+                style={{ background: 'rgba(255,255,255,0.05)', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '18px', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}
+                title="Close"
+              >✕</button>
+            </div>
+
+            <div style={{ textAlign: 'center', marginBottom: '32px', padding: '24px', background: 'rgba(255,255,255,0.02)', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <div style={{ fontSize: '48px', marginBottom: '12px' }}>{profile.role === 'driver' ? '🚗' : '👤'}</div>
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '22px', fontWeight: 800, color: '#fff' }}>{profile.name}</h3>
+              
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
                 {profile.avg_rating ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <StarRating value={Math.round(parseFloat(profile.avg_rating))} />
-                    <span style={{ color: '#FACC15', fontWeight: 700, fontSize: '14px' }}>{profile.avg_rating}</span>
-                    <span style={{ color: '#6b7280', fontSize: '12px' }}>({profile.review_count} reviews)</span>
-                  </div>
+                  <>
+                    <span style={{ fontSize: '24px', fontWeight: 900, color: '#FACC15' }}>⭐ {parseFloat(profile.avg_rating).toFixed(1)}</span>
+                    <span style={{ color: '#94a3b8', fontSize: '14px', fontWeight: 500 }}>({profile.review_count} reviews)</span>
+                  </>
                 ) : (
-                  <div style={{ color: '#6b7280', fontSize: '13px' }}>No ratings yet</div>
+                  <span style={{ color: '#64748b', fontSize: '14px', fontWeight: 600 }}>No ratings yet</span>
                 )}
               </div>
             </div>
@@ -180,16 +187,27 @@ export default function ReviewModal({ userId, rideId, rideStatus, onClose }: Rev
                 <button
                   onClick={handleSubmitReview}
                   disabled={rating === 0 || submitting}
+                  className="submit-review-btn"
                   style={{
-                    marginTop: '12px', width: '100%', padding: '11px',
-                    background: rating === 0 ? '#374151' : '#22c55e',
-                    color: rating === 0 ? '#6b7280' : '#000',
-                    border: 'none', borderRadius: '8px', fontWeight: 800, fontSize: '14px',
+                    marginTop: '12px', width: '100%', padding: '14px',
+                    background: rating === 0 ? '#1f2937' : 'linear-gradient(135deg, #22c55e, #16a34a)',
+                    color: rating === 0 ? '#4b5563' : '#000',
+                    border: rating === 0 ? '1px solid #374151' : 'none',
+                    borderRadius: '12px', fontWeight: 800, fontSize: '15px',
                     cursor: rating === 0 || submitting ? 'not-allowed' : 'pointer',
-                    transition: 'all 0.2s',
+                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    boxShadow: rating === 0 ? 'none' : '0 10px 15px -3px rgba(22, 163, 74, 0.2)',
+                    opacity: submitting ? 0.7 : 1,
                   }}
                 >
-                  {submitting ? 'Submitting...' : 'Submit Review'}
+                  {submitting ? (
+                    <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                      <span className="spinner" style={{ width: '16px', height: '16px', border: '2px solid rgba(0,0,0,0.1)', borderTopColor: '#000', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                      Submitting...
+                    </span>
+                  ) : (
+                    rating === 0 ? 'Select a Rating' : 'Submit Review'
+                  )}
                 </button>
               </div>
             )}

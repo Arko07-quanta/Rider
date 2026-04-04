@@ -503,7 +503,12 @@ router.post("/complete/:rideId", authenticateToken, async (req: any, res: any) =
 
     await client.query("COMMIT");
     
-    io.to(`ride_${rideId}`).emit("ride_status_update", { status: 'completed' });
+    io.to(`ride_${rideId}`).emit("ride_status_update", { 
+      status: 'completed', 
+      ride_id: Number(rideId),
+      rider_id: Number(rider_id),
+      driver_id: Number(driver_id)
+    });
     
     res.json({ message: "Ride completed!" });
   } catch (err: any) {
