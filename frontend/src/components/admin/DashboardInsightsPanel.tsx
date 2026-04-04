@@ -8,6 +8,7 @@ interface DashboardStats {
     total_completed_rides: string;
     avg_fare: string;
   };
+  active_drivers: number;
   growth: { day: string; signup_count: string }[];
   statusBreakdown: { status: string; count: string }[];
 }
@@ -62,7 +63,7 @@ export default function DashboardInsightsPanel() {
       {/* 💳 Top Metric Cards */}
       <div className="insights-metrics">
         <div className="insight-card highlight">
-          <label>Total Revenue</label>
+          <label>Total Fare Revenue</label>
           <div className="value">${parseFloat(stats?.financials.total_revenue || '0').toFixed(2)}</div>
           <div className="sub-value">{stats?.financials.total_completed_rides} successful trips</div>
         </div>
@@ -73,7 +74,7 @@ export default function DashboardInsightsPanel() {
         </div>
         <div className="insight-card">
           <label>Active Fleet</label>
-          <div className="value">124</div>
+          <div className="value">{stats?.active_drivers || 0}</div>
           <div className="sub-value">drivers online</div>
         </div>
       </div>

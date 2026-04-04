@@ -132,19 +132,27 @@ router.get("/dashboard-stats", authenticateAdmin, async (req: any, res: any) => 
       WHERE status = 'completed'
     `);
 
-    // 2. User Growth (Last 7 Days)
+    // 2. Online Drivers Count (Active Fleet - updated in last 5 mins)
+    const activeDrivers = await pool.query(`
+      SELECT COUNT(*) AS active_drivers
+      FROM drivers
+      WHERE is_verified = TRUE 
+        AND updated_at > NOW() - INTERVAL '5 minutes'
+    `);
+
+    // 3. User Growth (Last 7 Days)
     const userGrowth = await pool.query(`
       SELECT 
         DATE(created_at) AS day,
         COUNT(*) AS signup_count
       FROM users
-      WHERE created_at > CURRENT_DATE - INTERVAL '7 days'
       GROUP BY DATE(created_at)
-      ORDER BY day ASC
+      ORDER BY day DESC
+      LIMIT 7
     `);
 
-    // 3. Ride Status Counts
-    const statusCounts = await pool.query(`
+    // 4. Ride Status Breakdown
+    const statusBreakdown = await pool.query(`
       SELECT status, COUNT(*) AS count
       FROM rides
       GROUP BY status
@@ -152,8 +160,9 @@ router.get("/dashboard-stats", authenticateAdmin, async (req: any, res: any) => 
 
     res.json({
       financials: financialStats.rows[0],
+      active_drivers: parseInt(activeDrivers.rows[0].active_drivers),
       growth: userGrowth.rows,
-      statusBreakdown: statusCounts.rows
+      statusBreakdown: statusBreakdown.rows
     });
   } catch (err) {
     console.error("Dashboard stats error:", err);
@@ -261,9 +270,11 @@ router.get("/analytics-cashflow", authenticateAdmin, async (req: any, res: any) 
     const result = await pool.query(`
       SELECT 
           DATE(t.timestamp) as transaction_date,
-          SUM(CASE WHEN t.type = 'credit' THEN t.amount ELSE 0 END) as total_credits,
-          SUM(CASE WHEN t.type = 'debit' THEN t.amount ELSE 0 END) as total_debits
+          SUM(CASE WHEN t.type = 'debit' THEN t.amount ELSE 0 END) as rider_payments,
+          SUM(CASE WHEN t.type = 'credit' THEN t.amount ELSE 0 END) as driver_payouts,
+          (SUM(CASE WHEN t.type = 'debit' THEN t.amount ELSE 0 END) - SUM(CASE WHEN t.type = 'credit' THEN t.amount ELSE 0 END)) as platform_revenue
       FROM transactions t
+      WHERE t.ride_id IS NOT NULL
       GROUP BY DATE(t.timestamp)
       ORDER BY transaction_date DESC
       LIMIT 7

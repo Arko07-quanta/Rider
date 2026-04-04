@@ -307,17 +307,17 @@ export default function Driver() {
                   </div>
                   <hr className="active-ride-separator" />
                   <div className="active-ride-stats" style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px' }}>
-                    <div className="stat-item">
-                      <span className="stat-label" style={{ fontSize: '0.8em', color: '#666' }}>Distance</span>
-                      <strong className="stat-value" style={{ display: 'block' }}>{Number(activeRide.distance).toFixed(1)} km</strong>
+                    <div className="stat-card" style={{ flex: 1, textAlign: 'center', background: 'rgba(255,255,255,0.05)', padding: '10px', borderRadius: '12px' }}>
+                      <span className="stat-label" style={{ fontSize: '0.85em', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Distance</span>
+                      <strong className="stat-value" style={{ fontSize: '1.2em', color: '#fff' }}>{activeRide.distance} km</strong>
                     </div>
-                    <div className="stat-item">
-                      <span className="stat-label" style={{ fontSize: '0.8em', color: '#666' }}>Time</span>
-                      <strong className="stat-value" style={{ display: 'block' }}>{Math.round(activeRide.duration)} mins</strong>
+                    <div className="stat-card" style={{ flex: 1, textAlign: 'center', background: 'rgba(255,255,255,0.05)', padding: '10px', borderRadius: '12px' }}>
+                      <span className="stat-label" style={{ fontSize: '0.85em', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Time</span>
+                      <strong className="stat-value" style={{ fontSize: '1.2em', color: '#fff' }}>{activeRide.duration} min</strong>
                     </div>
-                    <div className="stat-item">
-                      <span className="stat-label" style={{ fontSize: '0.8em', color: '#666' }}>Your Payout</span>
-                      <strong className="stat-value" style={{ display: 'block', color: '#16a34a' }}>${(Number(activeRide.fare) * 0.8).toFixed(2)}</strong>
+                    <div className="stat-card" style={{ flex: 1, textAlign: 'center', background: 'rgba(34,197,94,0.1)', padding: '10px', borderRadius: '12px', border: '1px solid rgba(34,197,94,0.2)' }}>
+                      <span className="stat-label" style={{ fontSize: '0.85em', color: '#22c55e', display: 'block', marginBottom: '4px' }}>Your Payout</span>
+                      <strong className="stat-value" style={{ fontSize: '1.2em', color: '#22c55e' }}>${Number(activeRide.fare).toFixed(2)}</strong>
                     </div>
                   </div>
                 </div>
@@ -353,18 +353,18 @@ export default function Driver() {
                     </div>
                     <div className="preview-body">
                       <p><strong>Rider:</strong> {selectedPreview.rider_name}</p>
-                      <div className="preview-stats" style={{ display: 'flex', gap: '15px', margin: '10px 0', padding: '10px', background: '#f8fafc', borderRadius: '6px' }}>
-                        <div>
-                          <span style={{ fontSize: '0.8em', color: '#64748b' }}>Distance:</span>
-                          <div style={{ fontWeight: 'bold' }}>{Number(selectedPreview.distance).toFixed(1)} km</div>
+                      <div className="preview-stats" style={{ display: 'flex', gap: '15px', margin: '15px 0', padding: '16px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <div style={{ flex: 1, textAlign: 'center' }}>
+                          <span style={{ fontSize: '0.85em', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Distance:</span>
+                          <div style={{ fontWeight: 'bold', color: '#fff', fontSize: '1.2em' }}>{selectedPreview.distance} km</div>
                         </div>
-                        <div>
-                          <span style={{ fontSize: '0.8em', color: '#64748b' }}>Time:</span>
-                          <div style={{ fontWeight: 'bold' }}>{Math.round(selectedPreview.duration)} mins</div>
+                        <div style={{ flex: 1, textAlign: 'center' }}>
+                          <span style={{ fontSize: '0.85em', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Time:</span>
+                          <div style={{ fontWeight: 'bold', color: '#fff', fontSize: '1.2em' }}>{selectedPreview.duration} min</div>
                         </div>
-                        <div>
-                          <span style={{ fontSize: '0.8em', color: '#64748b' }}>Your Payout:</span>
-                          <div style={{ fontWeight: 'bold', color: '#16a34a' }}>${(Number(selectedPreview.fare) * 0.8).toFixed(2)}</div>
+                        <div style={{ flex: 1, textAlign: 'center' }}>
+                          <span style={{ fontSize: '0.85em', color: '#22c55e', display: 'block', marginBottom: '4px' }}>Your Payout:</span>
+                          <div style={{ fontWeight: 'bold', color: '#22c55e', fontSize: '1.4em' }}>${Number(selectedPreview.fare).toFixed(2)}</div>
                         </div>
                       </div>
                       <button
@@ -398,7 +398,8 @@ export default function Driver() {
                           dropoff_address: req.dropoff_address,
                           rider_name: req.rider_name,
                           distance: req.distance,
-                          fare: Number(req.fare) * 0.8
+                          duration: req.duration,
+                          fare: Number(req.fare)
                         }}
                         showRider
                         onClick={() => setSelectedPreview(req)}

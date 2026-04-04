@@ -14,8 +14,9 @@ interface VehicleStats {
 
 interface CashFlow {
   transaction_date: string;
-  total_credits: string;
-  total_debits: string;
+  rider_payments: string;
+  driver_payouts: string;
+  platform_revenue: string;
 }
 
 export default function AnalyticsPanel() {
@@ -64,7 +65,7 @@ export default function AnalyticsPanel() {
               <tr key={i}>
                 <td>{d.name}</td>
                 <td>{d.license_number}</td>
-                <td style={{ color: '#2e7d32', fontWeight: 'bold' }}>${Number(d.total_earnings).toFixed(2)}</td>
+                <td style={{ color: '#22c55e', fontWeight: 'bold' }}>${Number(d.total_earnings).toFixed(2)}</td>
               </tr>
             ))}
             {drivers.length === 0 && <tr><td colSpan={3}>No driver earnings yet.</td></tr>}
@@ -98,20 +99,24 @@ export default function AnalyticsPanel() {
         <table className="admin-table">
           <thead>
             <tr>
-              <th>Transaction Date</th>
-              <th>Total Credits (Paid to Drivers)</th>
-              <th>Total Debits (Charged to Riders)</th>
+              <th>Date</th>
+              <th>Rider Payments (In)</th>
+              <th>Driver Payouts (Out)</th>
+              <th>Net Platform Revenue (20%)</th>
             </tr>
           </thead>
           <tbody>
             {cashflow.map((c, i) => (
               <tr key={i}>
                 <td>{new Date(c.transaction_date).toLocaleDateString()}</td>
-                <td style={{ color: '#2e7d32' }}>${Number(c.total_credits).toFixed(2)}</td>
-                <td style={{ color: '#d32f2f' }}>${Number(c.total_debits).toFixed(2)}</td>
+                <td style={{ color: '#fff' }}>${Number(c.rider_payments).toFixed(2)}</td>
+                <td style={{ color: '#ef4444' }}>-${Number(c.driver_payouts).toFixed(2)}</td>
+                <td style={{ color: Number(c.platform_revenue) >= 0 ? '#22c55e' : '#fff', fontWeight: 'bold' }}>
+                  ${Number(c.platform_revenue).toFixed(2)}
+                </td>
               </tr>
             ))}
-            {cashflow.length === 0 && <tr><td colSpan={3}>No transactions logged yet.</td></tr>}
+            {cashflow.length === 0 && <tr><td colSpan={4}>No transactions logged yet.</td></tr>}
           </tbody>
         </table>
       </section>
