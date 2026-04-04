@@ -298,7 +298,7 @@ router.get("/pending", authenticateToken, async (req: any, res: any) => {
   const driver_id = req.user.id;
   try {
     const result = await pool.query(
-      `SELECT rq.request_id, u.name AS rider_name,
+      `SELECT rq.request_id, u.name AS rider_name, rq.rider_id,
               lp.address AS pickup_address, ld.address AS dropoff_address,
               lp.latitude AS pickup_lat, lp.longitude AS pickup_lng,
               ld.latitude AS dropoff_lat, ld.longitude AS dropoff_lng,
@@ -389,10 +389,19 @@ router.post("/accept/:requestId", authenticateToken, async (req: any, res: any) 
 
     await client.query("COMMIT");
     
-    // Notify the rider immediately that the request is accepted
-    io.to(`request_${requestId}`).emit("ride_status_update", { status: 'accepted' });
+    const driverResult = await pool.query("SELECT name FROM users WHERE user_id = $1", [driver_id]);
+    const driver_name = driverResult.rows[0]?.name;
+    const ride_id = rideResult.rows[0]?.ride_id;
     
-    res.json({ ride_id: rideResult.rows[0]?.ride_id, message: "Ride accepted!" });
+    // Notify the rider immediately that the request is accepted
+    io.to(`request_${requestId}`).emit("ride_status_update", { 
+      status: 'accepted', 
+      driver_name,
+      ride_id,
+      request_id: requestId
+    });
+    
+    res.json({ ride_id, message: "Ride accepted!" });
   } catch (err: any) {
     await client.query("ROLLBACK");
     console.error("Accept ride error:", err);
@@ -406,7 +415,7 @@ router.get("/my-ride", authenticateToken, async (req: any, res: any) => {
   const driver_id = req.user.id;
   try {
     const result = await pool.query(
-      `SELECT r.ride_id, r.status, r.distance, (r.fare * 0.8) as fare, r.duration,
+      `SELECT r.ride_id, r.request_id, r.status, r.distance, (r.fare * 0.8) as fare, r.duration,
               u.name AS rider_name, u.phone AS rider_phone,
               rq.rider_id,
               lp.address AS pickup_address, ld.address AS dropoff_address,

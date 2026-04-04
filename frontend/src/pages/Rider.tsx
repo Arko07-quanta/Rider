@@ -44,6 +44,7 @@ export default function Rider() {
   const [couponError, setCouponError] = useState('');
   const [showCouponModal, setShowCouponModal] = useState(false);
   const [availableCoupons, setAvailableCoupons] = useState<any[]>([]);
+  const [matchNotification, setMatchNotification] = useState<{ name: string, rideId: number } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const locationSyncRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const selfLocationRef = useRef<{ lat: number, lng: number } | null>(null);
@@ -143,8 +144,16 @@ export default function Rider() {
       });
     });
 
-    socket.on("ride_status_update", () => {
+    socket.on("ride_status_update", (data: any) => {
       fetchHistory();
+      if (data.status === 'accepted') {
+        setMatchNotification({ 
+          name: data.driver_name || 'A driver', 
+          rideId: data.ride_id 
+        });
+        // Auto-clear after 10 seconds
+        setTimeout(() => setMatchNotification(null), 10000);
+      }
     });
 
     return () => {
@@ -770,6 +779,28 @@ const hasInsufficientBalance = wallet ? Number(wallet.balance) < Number(estimate
         </div>
       )}
 
+      {matchNotification && (
+        <div className="match-notification-overlay animated slideInUp" style={{
+          position: 'fixed', bottom: '30px', left: '50%', transform: 'translateX(-50%)',
+          background: 'var(--bg-secondary)', padding: '20px', borderRadius: '16px',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.5)', border: '1px solid var(--color-primary)',
+          zIndex: 3000, display: 'flex', alignItems: 'center', gap: '15px', color: '#fff',
+          width: '90%', maxWidth: '400px'
+        }}>
+          <div style={{ fontSize: '24px' }}>🚕</div>
+          <div style={{ flex: 1 }}>
+            <h4 style={{ margin: 0, color: 'var(--color-primary)' }}>Driver Found!</h4>
+            <p style={{ margin: '2px 0 0', fontSize: '0.9em' }}><strong>{matchNotification.name}</strong> has accepted your ride.</p>
+          </div>
+          <button 
+            className="btn-secondary" 
+            onClick={() => setMatchNotification(null)}
+            style={{ padding: '6px 12px', fontSize: '13px' }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,14 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import './Driver.css';
+import { io, Socket } from 'socket.io-client';
 import RouteMap from '../components/map/RouteMap';
 import RideItem, { type RideData } from '../components/rides/RideItem';
 import Chat from '../components/chat/Chat';
 import api from '../api/axios';
+import ReviewModal from '../components/reviews/ReviewModal';
 
 type Phase = 'searching' | 'active';
 
 interface PendingRequest {
   request_id: number;
+  rider_id: number;
   rider_name: string;
   pickup_address: string;
   dropoff_address: string;
@@ -45,6 +48,7 @@ interface ActiveRide {
   distance: number;
   fare: number;
   duration: number;
+  request_id: number;
 }
 
 export default function Driver() {
@@ -57,6 +61,8 @@ export default function Driver() {
   const [selectedPreview, setSelectedPreview] = useState<PendingRequest | null>(null);
   const [accepting, setAccepting] = useState<number | null>(null);
   const [selfLocation, setSelfLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [viewingRiderId, setViewingRiderId] = useState<number | null>(null);
+  const socketRef = useRef<Socket | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = useCallback(() => {
@@ -92,6 +98,14 @@ export default function Driver() {
         setPhase('active');
         setSelectedPreview(null);
         stopPolling();
+      } else {
+        if (phase !== 'searching') {
+          setPhase('searching');
+          setActiveRide(null);
+          if (!pollRef.current) {
+            pollRef.current = setInterval(pollPendingRequests, 4000);
+          }
+        }
       }
     } catch (err) {
       console.error('Active ride poll error:', err);
@@ -108,14 +122,44 @@ export default function Driver() {
   }, []);
 
   useEffect(() => {
+    socketRef.current = io(api.defaults.baseURL || '', {
+      auth: { token: localStorage.getItem('token') }
+    });
+
     pollActiveRide().then(() => {
       pollRef.current = setInterval(pollPendingRequests, 4000);
       pollPendingRequests();
     });
     fetchHistory();
     fetchWallet();
-    return () => stopPolling();
+
+    return () => {
+      stopPolling();
+      socketRef.current?.disconnect();
+    };
   }, [pollActiveRide, pollPendingRequests, stopPolling, fetchHistory, fetchWallet]);
+
+  useEffect(() => {
+    if (activeRide?.request_id && socketRef.current) {
+      const socket = socketRef.current;
+      socket.emit('join_request', activeRide.request_id);
+
+      socket.on('ride_status_update', (data: any) => {
+        if (data.status === 'cancelled' || data.status === 'searching') {
+          setPhase('searching');
+          setActiveRide(null);
+          fetchHistory();
+          if (!pollRef.current) {
+            pollRef.current = setInterval(pollPendingRequests, 4000);
+          }
+        }
+      });
+
+      return () => {
+        socket.off('ride_status_update');
+      };
+    }
+  }, [activeRide?.request_id, fetchHistory, pollPendingRequests]);
 
   useEffect(() => {
     const fetchIPLocation = async () => {
@@ -352,7 +396,16 @@ export default function Driver() {
                       <button className="close-preview" onClick={() => setSelectedPreview(null)}>✕</button>
                     </div>
                     <div className="preview-body">
-                      <p><strong>Rider:</strong> {selectedPreview.rider_name}</p>
+                      <p style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span><strong>Rider:</strong> {selectedPreview.rider_name}</span>
+                        <button 
+                          className="btn-profile-preview"
+                          onClick={() => setViewingRiderId(selectedPreview.rider_id)}
+                          style={{ padding: '4px 10px', fontSize: '0.8em', borderRadius: '15px' }}
+                        >
+                          👤 View Reviews
+                        </button>
+                      </p>
                       <div className="preview-stats" style={{ display: 'flex', gap: '15px', margin: '15px 0', padding: '16px', background: 'rgba(255,255,255,0.05)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}>
                         <div style={{ flex: 1, textAlign: 'center' }}>
                           <span style={{ fontSize: '0.85em', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Distance:</span>
@@ -448,6 +501,12 @@ export default function Driver() {
         />
       )}
 
+      {viewingRiderId && (
+        <ReviewModal 
+          userId={viewingRiderId} 
+          onClose={() => setViewingRiderId(null)}
+        />
+      )}
     </div>
   );
 }
