@@ -206,6 +206,7 @@ router.get("/my-requests", authenticateToken, async (req: any, res: any) => {
           r.distance,
           r.fare,
           r.discount_amount,
+          r.driver_id AS driver_user_id,
           u_driver.name AS driver_name,
           u_driver.phone AS driver_phone
        FROM ride_requests rq
@@ -336,6 +337,7 @@ router.get("/activity", authenticateToken, async (req: any, res: any) => {
           lp.address AS pickup_address, 
           ld.address AS dropoff_address,
           u_rider.name AS rider_name,
+          rq.rider_id,
           r.distance,
           (r.fare * 0.8) AS fare
        FROM rides r
@@ -406,6 +408,7 @@ router.get("/my-ride", authenticateToken, async (req: any, res: any) => {
     const result = await pool.query(
       `SELECT r.ride_id, r.status, r.distance, (r.fare * 0.8) as fare, r.duration,
               u.name AS rider_name, u.phone AS rider_phone,
+              rq.rider_id,
               lp.address AS pickup_address, ld.address AS dropoff_address,
               lp.latitude AS pickup_lat, lp.longitude AS pickup_lng,
               ld.latitude AS dropoff_lat, ld.longitude AS dropoff_lng
@@ -585,6 +588,157 @@ router.post("/rider-location", authenticateToken, async (req: any, res: any) => 
     res.json({ message: "Rider location noted" });
   } catch (err: any) {
     console.error("Rider location error:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post("/review/:rideId", authenticateToken, async (req: any, res: any) => {
+  const { rideId } = req.params;
+  const { rating, comment } = req.body;
+  const caller_id = req.user.id;
+
+  if (!rating || rating < 1 || rating > 5) {
+    return res.status(400).json({ message: "Rating must be between 1 and 5" });
+  }
+
+  const client = await pool.connect();
+  try {
+    // Verify ride is completed and caller is part of it
+    const rideRes = await client.query(
+      `SELECT r.ride_id, r.status, r.driver_id, rq.rider_id
+       FROM rides r
+       JOIN ride_requests rq ON rq.request_id = r.request_id
+       WHERE r.ride_id = $1`,
+      [rideId]
+    );
+
+    if (rideRes.rows.length === 0) {
+      return res.status(404).json({ message: "Ride not found" });
+    }
+
+    const ride = rideRes.rows[0];
+
+    if (ride.status !== 'completed') {
+      return res.status(400).json({ message: "Can only review completed rides" });
+    }
+
+    const isRider = Number(ride.rider_id) === Number(caller_id);
+    const isDriver = Number(ride.driver_id) === Number(caller_id);
+
+    if (!isRider && !isDriver) {
+      return res.status(403).json({ message: "Not part of this ride" });
+    }
+
+    const review_type = isRider ? 'rider_to_driver' : 'driver_to_rider';
+
+    // Check for duplicate review
+    const dupCheck = await client.query(
+      `SELECT 1 FROM reviews WHERE ride_id = $1 AND author_id = $2`,
+      [rideId, caller_id]
+    );
+
+    if (dupCheck.rows.length > 0) {
+      return res.status(409).json({ message: "You have already reviewed this ride" });
+    }
+
+    await client.query(
+      `INSERT INTO reviews (ride_id, author_id, rating, comment, review_type)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [rideId, caller_id, rating, comment || null, review_type]
+    );
+
+    // If rider reviewed the driver, update driver's avg rating
+    if (isRider && ride.driver_id) {
+      await client.query(
+        `UPDATE drivers SET rating = (
+           SELECT ROUND(AVG(rev.rating)::numeric, 2)
+           FROM reviews rev
+           JOIN rides r2 ON rev.ride_id = r2.ride_id
+           WHERE r2.driver_id = $1 AND rev.review_type = 'rider_to_driver'
+         ) WHERE user_id = $1`,
+        [ride.driver_id]
+      );
+    }
+
+    res.status(201).json({ message: "Review submitted successfully" });
+  } catch (err: any) {
+    console.error("Submit review error:", err);
+    res.status(500).json({ message: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+router.get("/profile/:userId", authenticateToken, async (req: any, res: any) => {
+  const { userId } = req.params;
+  const { rideId } = req.query;
+  const caller_id = req.user.id;
+
+  try {
+    // Get user basic info
+    const userRes = await pool.query(
+      `SELECT user_id, name, role FROM users WHERE user_id = $1`,
+      [userId]
+    );
+
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const user = userRes.rows[0];
+
+    // Get avg rating and count (reviews written ABOUT this user)
+    const ratingRes = await pool.query(
+      `SELECT
+         ROUND(AVG(rev.rating)::numeric, 1) AS avg_rating,
+         COUNT(*) AS review_count
+       FROM reviews rev
+       JOIN rides r ON rev.ride_id = r.ride_id
+       JOIN ride_requests rq ON rq.request_id = r.request_id
+       WHERE (
+         (rev.review_type = 'rider_to_driver' AND r.driver_id = $1) OR
+         (rev.review_type = 'driver_to_rider' AND rq.rider_id = $1)
+       )`,
+      [userId]
+    );
+
+    // Get recent reviews about this user
+    const reviewsRes = await pool.query(
+      `SELECT rev.rating, rev.comment, rev.created_at, u.name AS author_name
+       FROM reviews rev
+       JOIN rides r ON rev.ride_id = r.ride_id
+       JOIN ride_requests rq ON rq.request_id = r.request_id
+       JOIN users u ON u.user_id = rev.author_id
+       WHERE (
+         (rev.review_type = 'rider_to_driver' AND r.driver_id = $1) OR
+         (rev.review_type = 'driver_to_rider' AND rq.rider_id = $1)
+       )
+       ORDER BY rev.created_at DESC
+       LIMIT 10`,
+      [userId]
+    );
+
+    // Check if the caller has already reviewed for this specific ride
+    let hasReviewed = false;
+    if (rideId) {
+      const dupCheck = await pool.query(
+        `SELECT 1 FROM reviews WHERE ride_id = $1 AND author_id = $2`,
+        [rideId, caller_id]
+      );
+      hasReviewed = dupCheck.rows.length > 0;
+    }
+
+    res.json({
+      user_id: user.user_id,
+      name: user.name,
+      role: user.role,
+      avg_rating: ratingRes.rows[0].avg_rating || null,
+      review_count: parseInt(ratingRes.rows[0].review_count),
+      reviews: reviewsRes.rows,
+      has_reviewed: hasReviewed,
+    });
+  } catch (err: any) {
+    console.error("Get profile error:", err);
     res.status(500).json({ message: err.message });
   }
 });

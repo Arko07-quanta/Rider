@@ -24,7 +24,7 @@ const verifyUserVersion = async (token: string): Promise<any> => {
 };
 
 export const authenticateToken = async (req: AuthRequest, res: Response, next: NextFunction) => {
-  const token = req.cookies?.token || req.headers.authorization?.split(" ")[1];
+  const token = req.cookies?.token;
 
   if (!token) {
     return res.status(401).json({ message: "No token provided. Access denied." });
@@ -39,7 +39,7 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
 };
 
 export const authenticateAdmin = async (req: AuthRequest, res: Response, next: NextFunction) => {
-  const token = req.cookies?.token || req.headers.authorization?.split(" ")[1];
+  const token = req.cookies?.token;
 
   if (!token) {
     return res.status(401).json({ message: "No token provided. Access denied." });

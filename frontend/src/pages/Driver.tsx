@@ -33,6 +33,7 @@ interface Transaction {
 
 interface ActiveRide {
   ride_id: number;
+  rider_id: number;
   rider_name: string;
   rider_phone: string;
   pickup_address: string;
@@ -438,7 +439,12 @@ export default function Driver() {
       </div>
 
       {phase === 'active' && activeRide && (
-        <Chat rideId={activeRide.ride_id} theirName={activeRide.rider_name} />
+        <Chat
+          rideId={activeRide.ride_id}
+          theirName={activeRide.rider_name}
+          theirUserId={activeRide.rider_id}
+          rideStatus="ongoing"
+        />
       )}
 
     </div>

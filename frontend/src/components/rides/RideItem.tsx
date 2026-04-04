@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import ReviewModal from '../reviews/ReviewModal';
 import './RideItem.css';
 
 export interface RideData {
@@ -16,6 +18,8 @@ export interface RideData {
   duration?: number | string | null;
   fare?: number | string | null;
   discount_amount?: number | string | null;
+  driver_user_id?: number | null;
+  rider_id?: number | null;
   driver_name?: string | null;
   driver_phone?: string | null;
   rider_name?: string | null;
@@ -29,6 +33,15 @@ interface RideItemProps {
 }
 
 export default function RideItem({ ride, showRider, onClick, active }: RideItemProps) {
+  const [profileUserId, setProfileUserId] = useState<number | null>(null);
+
+  const isCompleted = ride.ride_status === 'completed';
+
+  const handleProfileClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const uid = showRider ? ride.rider_id : ride.driver_user_id;
+    if (uid) setProfileUserId(uid);
+  };
   const getStatusLabel = () => {
     if (ride.request_status === 'pending') return 'Pending';
     if (ride.request_status === 'cancelled') return 'Cancelled';
@@ -80,6 +93,20 @@ export default function RideItem({ ride, showRider, onClick, active }: RideItemP
           ) : (
             <div className="person-info">🚗 Driver: <strong>{ride.driver_name || 'Searching...'}</strong></div>
           )}
+
+          {isCompleted && (showRider ? ride.rider_id : ride.driver_user_id) && (
+            <button
+              onClick={handleProfileClick}
+              title="View profile & reviews"
+              style={{
+                background: 'none', border: '1px solid #374151', borderRadius: '6px',
+                cursor: 'pointer', fontSize: '13px', color: '#9ca3af',
+                padding: '3px 8px', marginLeft: '8px',
+              }}
+            >
+              👤 Profile
+            </button>
+          )}
           
           {ride.fare && Number(ride.fare) > 0 && (
             <div className="fare-info">
@@ -101,6 +128,15 @@ export default function RideItem({ ride, showRider, onClick, active }: RideItemP
           )}
         </div>
       </div>
+
+      {profileUserId != null && ride.ride_id != null && (
+        <ReviewModal
+          userId={profileUserId}
+          rideId={ride.ride_id}
+          rideStatus={ride.ride_status ?? undefined}
+          onClose={() => setProfileUserId(null)}
+        />
+      )}
     </div>
   );
 }

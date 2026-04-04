@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import api from '../../api/axios';
+import ReviewModal from '../reviews/ReviewModal';
 import './Chat.css';
 
 interface ChatMessage {
@@ -12,10 +13,18 @@ interface ChatMessage {
   sender_name: string;
 }
 
-export default function Chat({ rideId, theirName }: { rideId: number, theirName: string }) {
+interface ChatProps {
+  rideId: number;
+  theirName: string;
+  theirUserId?: number;
+  rideStatus?: string;
+}
+
+export default function Chat({ rideId, theirName, theirUserId, rideStatus }: ChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isOpen, setIsOpen] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -69,7 +78,7 @@ export default function Chat({ rideId, theirName }: { rideId: number, theirName:
     try {
       await api.post('/api/chat/send', { ride_id: rideId, message_text: newMessage });
       setNewMessage('');
-      fetchMessages();
+      // No need to call fetchMessages() — the socket 'new_message' event adds it automatically
     } catch (err) {
       console.error('Send error', err);
     }
@@ -77,10 +86,28 @@ export default function Chat({ rideId, theirName }: { rideId: number, theirName:
 
   return (
     <div className={`chat-widget ${isOpen ? 'open' : 'closed'}`}>
-      <div className="chat-header" onClick={() => setIsOpen(!isOpen)}>
-        <h4>💬 Chat with {theirName}</h4>
-        <span className="toggle-icon">{isOpen ? '▼' : '▲'}</span>
+      <div className="chat-header">
+        <div className="chat-header-left" onClick={() => setIsOpen(!isOpen)} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+          <h4 style={{ margin: 0 }}>💬 Chat with {theirName}</h4>
+          <span className="toggle-icon">{isOpen ? '▼' : '▲'}</span>
+        </div>
+        {theirUserId && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowProfile(true); }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', padding: '0 4px' }}
+            title={`View ${theirName}'s profile`}
+          >👤</button>
+        )}
       </div>
+
+      {showProfile && theirUserId && (
+        <ReviewModal
+          userId={theirUserId}
+          rideId={rideId}
+          rideStatus={rideStatus}
+          onClose={() => setShowProfile(false)}
+        />
+      )}
       
       {isOpen && (
         <div className="chat-body">

@@ -720,6 +720,8 @@ const hasInsufficientBalance = wallet ? Number(wallet.balance) < Number(estimate
         <Chat
           rideId={selectedHistoryRide.ride_id!}
           theirName={selectedHistoryRide.driver_name || 'Driver'}
+          theirUserId={selectedHistoryRide.driver_user_id ?? undefined}
+          rideStatus="ongoing"
         />
       )}
 
