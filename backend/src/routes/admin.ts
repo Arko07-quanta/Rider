@@ -86,9 +86,10 @@ router.delete("/decline-driver/:id", authenticateAdmin, async (req: any, res: an
 router.get("/users", authenticateAdmin, async (req: any, res: any) => {
   try {
     const result = await pool.query(`
-      SELECT user_id, name, email, role, status, created_at
-      FROM users
-      ORDER BY created_at DESC
+      SELECT u.user_id, u.name, u.email, u.role, u.status, u.created_at, a.access_level
+      FROM users u
+      LEFT JOIN admins a ON u.user_id = a.user_id
+      ORDER BY u.created_at DESC
     `);
     res.json(result.rows);
   } catch (err) {
@@ -417,11 +418,13 @@ router.get("/trips/:rideId/history", authenticateAdmin, async (req: any, res: an
 // ─── Admin Level Management ────────────────────────────────────────────────────
 
 router.post("/promote", authenticateAdmin, async (req: any, res: any) => {
-  if ((req.user.access_level ?? 0) < 1) {
-    return res.status(403).json({ message: "Insufficient admin level. Level 1+ required to promote." });
+  const { name_or_email, target_level = 1 } = req.body;
+  const adminLevel = req.user.access_level ?? 0;
+
+  if (adminLevel <= target_level && adminLevel !== 99) {
+    return res.status(403).json({ message: `Insufficient admin level. You cannot promote someone to level ${target_level} if you are level ${adminLevel}.` });
   }
 
-  const { name_or_email } = req.body;
   if (!name_or_email?.trim()) {
     return res.status(400).json({ message: "name_or_email is required" });
   }
@@ -429,25 +432,34 @@ router.post("/promote", authenticateAdmin, async (req: any, res: any) => {
   const client = await pool.connect();
   try {
     const userRes = await client.query(
-      `SELECT user_id, name, role FROM users WHERE (name = $1 OR email = $1) AND role != 'admin'`,
+      `SELECT u.user_id, u.name, u.role, a.access_level as current_level, a.original_role
+       FROM users u 
+       LEFT JOIN admins a ON a.user_id = u.user_id
+       WHERE (u.name = $1 OR u.email = $1)`,
       [name_or_email.trim()]
     );
 
     if (userRes.rows.length === 0) {
-      return res.status(404).json({ message: "User not found or is already an admin" });
+      return res.status(404).json({ message: "User not found" });
     }
 
     const target = userRes.rows[0];
+    
+    // Check if target is already an admin and has higher or equal level
+    if (target.role === 'admin' && (target.current_level ?? 0) >= adminLevel && adminLevel !== 99) {
+      return res.status(403).json({ message: "You cannot modify an admin with a level higher than or equal to yours." });
+    }
+
     await client.query("BEGIN");
-    await client.query("UPDATE users SET role = 'admin' WHERE user_id = $1", [target.user_id]);
+    await client.query("UPDATE users SET role = 'admin', token_version = token_version + 1 WHERE user_id = $1", [target.user_id]);
     await client.query(
-      `INSERT INTO admins (user_id, access_level, original_role) VALUES ($1, 1, $2)
-       ON CONFLICT (user_id) DO UPDATE SET access_level = 1, original_role = EXCLUDED.original_role`,
-      [target.user_id, target.role]
+      `INSERT INTO admins (user_id, access_level, original_role) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id) DO UPDATE SET access_level = $2, original_role = COALESCE(admins.original_role, EXCLUDED.original_role)`,
+      [target.user_id, target_level, target.role === 'admin' ? (target.original_role || 'rider') : target.role]
     );
     await client.query("COMMIT");
-    await logAdminAction(req.user.id, `Promoted ${target.name} (ID: ${target.user_id}) from ${target.role} to admin level 1`);
-    res.json({ message: `${target.name} promoted to admin (level 1) successfully` });
+    await logAdminAction(req.user.id, `Set ${target.name} (ID: ${target.user_id}) level to ${target_level}`);
+    res.json({ message: `${target.name} level set to ${target_level} successfully` });
   } catch (err: any) {
     await client.query("ROLLBACK");
     console.error("Promote error:", err);
@@ -458,11 +470,8 @@ router.post("/promote", authenticateAdmin, async (req: any, res: any) => {
 });
 
 router.post("/demote/:userId", authenticateAdmin, async (req: any, res: any) => {
-  if ((req.user.access_level ?? 0) !== 99) {
-    return res.status(403).json({ message: "Only level 99 admins can demote." });
-  }
-
   const { userId } = req.params;
+  const adminLevel = req.user.access_level ?? 0;
 
   if (Number(userId) === req.user.id) {
     return res.status(400).json({ message: "You cannot demote yourself." });
@@ -471,7 +480,7 @@ router.post("/demote/:userId", authenticateAdmin, async (req: any, res: any) => 
   const client = await pool.connect();
   try {
     const adminRes = await client.query(
-      `SELECT a.original_role, u.name FROM admins a JOIN users u ON u.user_id = a.user_id WHERE a.user_id = $1`,
+      `SELECT a.original_role, a.access_level, u.name FROM admins a JOIN users u ON u.user_id = a.user_id WHERE a.user_id = $1`,
       [userId]
     );
 
@@ -479,20 +488,21 @@ router.post("/demote/:userId", authenticateAdmin, async (req: any, res: any) => 
       return res.status(404).json({ message: "Admin not found" });
     }
 
-    const { original_role, name } = adminRes.rows[0];
-    const restoreRole = original_role || 'rider';
+    const target = adminRes.rows[0];
+
+    // Level check
+    if (target.access_level >= adminLevel && adminLevel !== 99) {
+      return res.status(403).json({ message: "You cannot demote an admin with a level higher than or equal to yours." });
+    }
+
+    const restoreRole = target.original_role || 'rider';
 
     await client.query("BEGIN");
     await client.query("DELETE FROM admins WHERE user_id = $1", [userId]);
-    await client.query("UPDATE users SET role = $1 WHERE user_id = $2", [restoreRole, userId]);
-
-    if (restoreRole === 'rider') {
-      await client.query("INSERT INTO riders (user_id) VALUES ($1) ON CONFLICT DO NOTHING", [userId]);
-    }
-
+    await client.query("UPDATE users SET role = $1, token_version = token_version + 1 WHERE user_id = $2", [restoreRole, userId]);
     await client.query("COMMIT");
-    await logAdminAction(req.user.id, `Demoted ${name} (ID: ${userId}) from admin back to ${restoreRole}`);
-    res.json({ message: `${name} successfully demoted back to ${restoreRole}` });
+    await logAdminAction(req.user.id, `Demoted ${target.name} (ID: ${userId}) from admin back to ${restoreRole}`);
+    res.json({ message: `${target.name} successfully demoted back to ${restoreRole}` });
   } catch (err: any) {
     await client.query("ROLLBACK");
     console.error("Demote error:", err);

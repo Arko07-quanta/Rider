@@ -60,7 +60,8 @@ CREATE TABLE users (
 
 CREATE TABLE admins (
   user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
-  access_level INT NOT NULL
+  access_level INT NOT NULL DEFAULT 1,
+  original_role user_role NOT NULL
 );
 
 CREATE TABLE riders (

@@ -174,7 +174,7 @@ const initializeDatabase = async () => {
            );
         }
       } else if (user.role === 'admin') {
-        await pool.query("INSERT INTO admins (user_id, access_level) VALUES ($1, 99) ON CONFLICT DO NOTHING", [userId]);
+        await pool.query("INSERT INTO admins (user_id, access_level, original_role) VALUES ($1, 99, 'rider') ON CONFLICT DO NOTHING", [userId]);
       }
 
       await pool.query("INSERT INTO wallets (user_id, balance) VALUES ($1, 0.00) ON CONFLICT DO NOTHING", [userId]);

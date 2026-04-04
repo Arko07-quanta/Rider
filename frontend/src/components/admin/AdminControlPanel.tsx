@@ -7,217 +7,248 @@ interface AdminControlPanelProps {
 
 export default function AdminControlPanel({ access_level }: AdminControlPanelProps) {
   const [promoteInput, setPromoteInput] = useState('');
+  const [targetLevel, setTargetLevel] = useState(1);
   const [promoteStatus, setPromoteStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [promoting, setPromoting] = useState(false);
 
-  const [demoteInput, setDemoteInput] = useState('');
-  const [demoteTarget, setDemoteTarget] = useState<{ user_id: number; name: string } | null>(null);
-  const [demoteStatus, setDemoteStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
-  const [demoting, setDemoting] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
+  const [foundAdmin, setFoundAdmin] = useState<{ user_id: number; name: string; email: string; access_level: number } | null>(null);
+  const [searchStatus, setSearchStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [updating, setUpdating] = useState(false);
 
-  const handlePromote = async (e: React.FormEvent) => {
+  const maxGrantableLevel = access_level === 99 ? 98 : access_level - 1;
+
+  const handlePromoteOrUpdate = async (e: React.FormEvent, levelOverride?: number) => {
     e.preventDefault();
-    if (!promoteInput.trim()) return;
+    const input = levelOverride !== undefined ? foundAdmin?.email : promoteInput;
+    const level = levelOverride !== undefined ? levelOverride : targetLevel;
+    
+    if (!input?.trim()) return;
+    
     setPromoting(true);
     setPromoteStatus(null);
     try {
-      const { data } = await api.post('/api/admin/promote', { name_or_email: promoteInput.trim() });
+      const { data } = await api.post('/api/admin/promote', { 
+        name_or_email: input.trim(),
+        target_level: level
+      });
       setPromoteStatus({ type: 'success', msg: data.message });
-      setPromoteInput('');
+      if (levelOverride === undefined) {
+          setPromoteInput('');
+      } else if (foundAdmin) {
+          setFoundAdmin({ ...foundAdmin, access_level: level });
+      }
     } catch (err: any) {
-      setPromoteStatus({ type: 'error', msg: err.response?.data?.message || 'Promotion failed' });
+      setPromoteStatus({ type: 'error', msg: err.response?.data?.message || 'Action failed' });
     } finally {
       setPromoting(false);
     }
   };
 
   const handleDemote = async () => {
-    if (!demoteTarget) return;
-    if (!window.confirm(`Demote ${demoteTarget.name} back to their original role?`)) return;
-    setDemoting(true);
-    setDemoteStatus(null);
+    if (!foundAdmin) return;
+    if (!window.confirm(`Are you sure you want to remove admin privileges from ${foundAdmin.name}?`)) return;
+    
+    setUpdating(true);
     try {
-      const { data } = await api.post(`/api/admin/demote/${demoteTarget.user_id}`);
-      setDemoteStatus({ type: 'success', msg: data.message });
-      setDemoteInput('');
-      setDemoteTarget(null);
+      const { data } = await api.post(`/api/admin/demote/${foundAdmin.user_id}`);
+      setPromoteStatus({ type: 'success', msg: data.message });
+      setFoundAdmin(null);
+      setSearchInput('');
     } catch (err: any) {
-      setDemoteStatus({ type: 'error', msg: err.response?.data?.message || 'Demotion failed' });
+      setPromoteStatus({ type: 'error', msg: err.response?.data?.message || 'Demotion failed' });
     } finally {
-      setDemoting(false);
+      setUpdating(false);
     }
   };
 
-  // For demote: search by name or email to get user_id first
-  const handleDemoteLookup = async (e: React.FormEvent) => {
+  const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!demoteInput.trim()) return;
-    setDemoteStatus(null);
+    if (!searchInput.trim()) return;
+    
+    setSearching(true);
+    setSearchStatus(null);
+    setFoundAdmin(null);
+    
     try {
-      // Re-use the users endpoint and filter client-side
       const { data } = await api.get('/api/admin/users');
+      // The /users endpoint doesn't return access_level from the JOIN by default in the basic GET /users
+      // but my new backend changes might need to facilitate this.
+      // Wait, let's check backend /users route.
       const match = data.find((u: any) =>
-        (u.name === demoteInput.trim() || u.email === demoteInput.trim()) && u.role === 'admin'
+        (u.name.toLowerCase() === searchInput.trim().toLowerCase() || u.email.toLowerCase() === searchInput.trim().toLowerCase())
       );
+      
       if (!match) {
-        setDemoteStatus({ type: 'error', msg: 'No admin found with that name or email' });
-        setDemoteTarget(null);
+        setSearchStatus({ type: 'error', msg: 'User not found' });
+      } else if (match.role !== 'admin') {
+        setSearchStatus({ type: 'error', msg: 'User found but they are not an admin. Use the promotion tool above.' });
       } else {
-        setDemoteTarget({ user_id: match.user_id, name: match.name });
-        setDemoteStatus(null);
+        // Fetch specific admin details or just use the match if we update the backend /users
+        // For now, let's assume we need to fetch their level or match has it.
+        // I'll update GET /users to include access_level.
+        setFoundAdmin(match);
       }
     } catch (err) {
-      setDemoteStatus({ type: 'error', msg: 'Failed to search users' });
+      setSearchStatus({ type: 'error', msg: 'Search failed' });
+    } finally {
+      setSearching(false);
     }
   };
 
-  const card = (children: React.ReactNode, accent = 'rgba(255,255,255,0.08)') => (
-    <div style={{
-      background: 'rgba(255,255,255,0.03)', border: `1px solid ${accent}`,
-      borderRadius: '14px', padding: '24px', marginBottom: '20px',
-    }}>
-      {children}
-    </div>
-  );
-
-  const statusBanner = (s: { type: 'success' | 'error'; msg: string }) => (
-    <div style={{
-      marginTop: '12px', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 600,
-      background: s.type === 'success' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
-      color: s.type === 'success' ? '#22c55e' : '#ef4444',
-      border: `1px solid ${s.type === 'success' ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+  const banner = (s: { type: 'success' | 'error'; msg: string }) => (
+    <div className={`status-banner ${s.type}`} style={{
+      marginTop: '16px', padding: '12px 16px', borderRadius: 'var(--radius-sm)',
+      fontSize: '14px', fontWeight: 600,
+      background: s.type === 'success' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+      color: s.type === 'success' ? 'var(--color-primary)' : '#ef4444',
+      border: `1px solid ${s.type === 'success' ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`,
     }}>
       {s.type === 'success' ? '✅' : '❌'} {s.msg}
     </div>
   );
 
   return (
-    <div style={{ maxWidth: '600px' }}>
-      <h2 style={{ marginBottom: '24px', fontSize: '18px', fontWeight: 800 }}>🛡️ Admin Control</h2>
-
-      {/* Badge */}
-      <div style={{
-        display: 'inline-flex', alignItems: 'center', gap: '8px',
-        background: 'rgba(250,204,21,0.1)', border: '1px solid rgba(250,204,21,0.3)',
-        borderRadius: '8px', padding: '8px 14px', marginBottom: '24px',
-      }}>
-        <span style={{ color: '#FACC15', fontWeight: 800, fontSize: '13px' }}>
-          🔑 Your Access Level: {access_level}
-        </span>
-        <span style={{ color: '#9ca3af', fontSize: '12px' }}>
-          {access_level === 99 ? '(Super Admin)' : access_level >= 1 ? '(Can Promote)' : '(Read Only)'}
-        </span>
+    <div className="admin-control-container" style={{ maxWidth: '800px' }}>
+      <div style={{ marginBottom: '32px' }}>
+        <h2 style={{ fontSize: '24px', fontWeight: 800, marginBottom: '8px' }}>🛡️ Admin Oversight</h2>
+        <p style={{ color: 'var(--text-secondary)' }}>Manage administrative roles and authority levels across the platform.</p>
       </div>
 
-      {/* Promote Section — level >= 1 */}
-      {access_level >= 1 && card(
-        <>
-          <h3 style={{ margin: '0 0 6px', fontSize: '15px', fontWeight: 800, color: '#22c55e' }}>
-            ⬆️ Promote User to Admin (Level 1)
-          </h3>
-          <p style={{ color: '#9ca3af', fontSize: '13px', margin: '0 0 16px' }}>
-            Enter the name or email of a rider or driver to promote them to an admin account.
-          </p>
-          <form onSubmit={handlePromote} style={{ display: 'flex', gap: '10px' }}>
+      <div className="surface-card" style={{ marginBottom: '24px', border: '1px solid var(--color-primary)', background: 'rgba(34,197,94,0.05)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ padding: '10px', background: 'rgba(34,197,94,0.1)', borderRadius: '50%' }}>🔑</div>
+          <div>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' }}>Your Authority</div>
+            <div style={{ fontSize: '18px', fontWeight: 800 }}>Level {access_level} {access_level === 99 ? '(Super Admin)' : ''}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Promotion Tool */}
+      <div className="surface-card" style={{ marginBottom: '32px' }}>
+        <h3 style={{ margin: '0 0 8px', fontSize: '18px', fontWeight: 800 }}>⬆️ Promote / Grant Authority</h3>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '24px' }}>
+          Assign administrative levels to riders or drivers. You can grant any level up to <strong>{maxGrantableLevel}</strong>.
+        </p>
+
+        <form onSubmit={(e) => handlePromoteOrUpdate(e)} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '12px' }}>
+          <div className="input-group">
             <input
               type="text"
-              placeholder="Name or email..."
+              placeholder="Enter name or email..."
               value={promoteInput}
               onChange={e => setPromoteInput(e.target.value)}
-              style={{
-                flex: 1, padding: '10px 14px', borderRadius: '8px', fontSize: '14px',
-                background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.15)',
-                color: '#fff', outline: 'none',
-              }}
+              style={{ height: '48px' }}
             />
-            <button
-              type="submit"
-              disabled={promoting || !promoteInput.trim()}
-              style={{
-                padding: '10px 20px', borderRadius: '8px', border: 'none',
-                background: !promoteInput.trim() ? '#374151' : '#22c55e',
-                color: !promoteInput.trim() ? '#6b7280' : '#000',
-                fontWeight: 800, fontSize: '14px', cursor: 'pointer', whiteSpace: 'nowrap',
-              }}
+          </div>
+          <div className="input-group">
+            <select 
+              value={targetLevel} 
+              onChange={e => setTargetLevel(parseInt(e.target.value))}
+              style={{ height: '48px', width: '120px' }}
             >
-              {promoting ? 'Promoting...' : 'Promote'}
-            </button>
-          </form>
-          {promoteStatus && statusBanner(promoteStatus)}
-        </>
-      )}
+              {[...Array(maxGrantableLevel + 1).keys()].map(lvl => (
+                <option key={lvl} value={lvl}>Level {lvl}</option>
+              ))}
+            </select>
+          </div>
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={promoting || !promoteInput.trim()}
+            style={{ height: '48px', padding: '0 32px' }}
+          >
+            {promoting ? 'Processing...' : 'Grant Access'}
+          </button>
+        </form>
+        {promoteStatus && banner(promoteStatus)}
+      </div>
 
-      {/* Demote Section — level 99 only */}
-      {access_level === 99 && card(
-        <>
-          <h3 style={{ margin: '0 0 6px', fontSize: '15px', fontWeight: 800, color: '#ef4444' }}>
-            ⬇️ Demote Admin Back to User
-          </h3>
-          <p style={{ color: '#9ca3af', fontSize: '13px', margin: '0 0 16px' }}>
-            Search for an admin by name or email, then demote them back to their original role.
-          </p>
-          <form onSubmit={handleDemoteLookup} style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
-            <input
-              type="text"
-              placeholder="Admin name or email..."
-              value={demoteInput}
-              onChange={e => { setDemoteInput(e.target.value); setDemoteTarget(null); }}
-              style={{
-                flex: 1, padding: '10px 14px', borderRadius: '8px', fontSize: '14px',
-                background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.15)',
-                color: '#fff', outline: 'none',
-              }}
-            />
-            <button
-              type="submit"
-              style={{
-                padding: '10px 20px', borderRadius: '8px', border: 'none',
-                background: '#374151', color: '#d1d5db',
-                fontWeight: 800, fontSize: '14px', cursor: 'pointer',
-              }}
-            >
-              Search
-            </button>
-          </form>
+      {/* Management & Demotion Tool */}
+      <div className="surface-card">
+        <h3 style={{ margin: '0 0 8px', fontSize: '18px', fontWeight: 800 }}>⬇️ Manage Existing Admins</h3>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '24px' }}>
+          Search for current admins to adjust their authority or revoke access.
+        </p>
 
-          {demoteTarget && (
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)',
-              borderRadius: '10px', padding: '12px 16px',
-            }}>
+        <form onSubmit={handleSearch} style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
+          <input
+            type="text"
+            placeholder="Search admin name or email..."
+            value={searchInput}
+            onChange={e => { setSearchInput(e.target.value); setFoundAdmin(null); }}
+            style={{ height: '48px' }}
+          />
+          <button
+            type="submit"
+            className="btn-secondary"
+            disabled={searching || !searchInput.trim()}
+            style={{ height: '48px', width: '120px' }}
+          >
+            {searching ? '...' : 'Search'}
+          </button>
+        </form>
+
+        {searchStatus && banner(searchStatus)}
+
+        {foundAdmin && (
+          <div style={{
+            background: 'var(--bg-surface)', border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-md)', padding: '24px',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
               <div>
-                <div style={{ fontWeight: 800, color: '#fff' }}>{demoteTarget.name}</div>
-                <div style={{ fontSize: '12px', color: '#9ca3af' }}>ID: {demoteTarget.user_id}</div>
+                <div style={{ fontSize: '20px', fontWeight: 800 }}>{foundAdmin.name}</div>
+                <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>{foundAdmin.email}</div>
+                <div style={{ 
+                  marginTop: '12px', display: 'inline-block', padding: '4px 12px', 
+                  background: 'rgba(250,204,21,0.1)', color: '#FACC15', 
+                  borderRadius: '20px', fontSize: '12px', fontWeight: 800 
+                }}>
+                  CURRENT LEVEL: {foundAdmin.access_level}
+                </div>
               </div>
-              <button
+              <button 
                 onClick={handleDemote}
-                disabled={demoting}
-                style={{
-                  padding: '8px 18px', borderRadius: '8px', border: 'none',
-                  background: '#ef4444', color: '#fff',
-                  fontWeight: 800, fontSize: '13px', cursor: 'pointer',
-                }}
+                className="btn-secondary"
+                disabled={updating || (foundAdmin.access_level >= access_level && access_level !== 99)}
+                style={{ color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)' }}
               >
-                {demoting ? 'Demoting...' : 'Confirm Demote'}
+                Revoke All Access
               </button>
             </div>
-          )}
 
-          {demoteStatus && statusBanner(demoteStatus)}
-        </>
-      )}
+            <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
+              <div style={{ fontSize: '14px', fontWeight: 700, marginBottom: '12px' }}>Adjust Level</div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {[...Array(maxGrantableLevel + 1).keys()].filter(lvl => lvl !== foundAdmin.access_level).map(lvl => (
+                  <button
+                    key={lvl}
+                    onClick={(e) => handlePromoteOrUpdate(e, lvl)}
+                    className="btn-secondary"
+                    style={{ fontSize: '12px', padding: '6px 12px' }}
+                  >
+                    Set to Level {lvl}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
-      {/* Level 0 message */}
       {access_level === 0 && (
         <div style={{
-          padding: '20px', borderRadius: '12px', textAlign: 'center',
-          background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
-          color: '#6b7280', fontSize: '14px',
+          marginTop: '32px', padding: '24px', borderRadius: 'var(--radius-md)', textAlign: 'center',
+          background: 'rgba(255,255,255,0.02)', border: '1px dotted var(--border-color)',
+          color: 'var(--text-muted)', fontSize: '14px',
         }}>
-          🔒 Your admin level (0) does not include promotion or demotion permissions.
+          🔒 Your current level (0) provides read-only access to the control panel.
         </div>
       )}
     </div>
   );
 }
+
