@@ -35,31 +35,12 @@ router.get("/verified-today", authenticateAdmin, async(req: any, res: any) => {
 
 router.post("/verify-driver/:id", authenticateAdmin, async (req: any, res: any) => {
   const { id } = req.params;
-  const client = await pool.connect();
-  
   try {
-    await client.query("BEGIN");
-
-    // 1. Mark driver as verified
-    await client.query(
-      "UPDATE drivers SET is_verified = TRUE, created_at = CURRENT_TIMESTAMP WHERE user_id = $1",
-      [id]
-    );
-
-    // 2. Commit
-    await client.query("COMMIT");
-
-    // 3. Log Action
-    await logAdminAction(req.user.id, `Admin ${req.user.name} verified driver with ID ${id}`);
-
+    await pool.query("CALL sp_verify_driver($1, $2, $3)", [id, req.user.id, req.user.name]);
     res.json({ message: "Driver verified successfully" });
-
   } catch (err: any) {
-    await client.query("ROLLBACK");
     console.error("Verify driver error:", err);
     res.status(500).json({ message: err.message });
-  } finally {
-    client.release();
   }
 });
 
@@ -429,43 +410,31 @@ router.post("/promote", authenticateAdmin, async (req: any, res: any) => {
     return res.status(400).json({ message: "name_or_email is required" });
   }
 
-  const client = await pool.connect();
   try {
-    const userRes = await client.query(
-      `SELECT u.user_id, u.name, u.role, a.access_level as current_level, a.original_role
-       FROM users u 
-       LEFT JOIN admins a ON a.user_id = u.user_id
-       WHERE (u.name = $1 OR u.email = $1)`,
+    const userRes = await pool.query(
+      `SELECT user_id, name, role FROM users WHERE (name = $1 OR email = $1)`,
       [name_or_email.trim()]
     );
 
     if (userRes.rows.length === 0) {
       return res.status(404).json({ message: "User not found" });
     }
-
+    
     const target = userRes.rows[0];
     
-    // Check if target is already an admin and has higher or equal level
-    if (target.role === 'admin' && (target.current_level ?? 0) >= adminLevel && adminLevel !== 99) {
-      return res.status(403).json({ message: "You cannot modify an admin with a level higher than or equal to yours." });
+    // Safety check BEFORE SP
+    if (target.role === 'admin') {
+      const a = await pool.query(`SELECT access_level FROM admins WHERE user_id = $1`, [target.user_id]);
+      if (a.rows.length > 0 && (a.rows[0].access_level ?? 0) >= adminLevel && adminLevel !== 99) {
+        return res.status(403).json({ message: "You cannot modify an admin with a level higher than or equal to yours." });
+      }
     }
 
-    await client.query("BEGIN");
-    await client.query("UPDATE users SET role = 'admin', token_version = token_version + 1 WHERE user_id = $1", [target.user_id]);
-    await client.query(
-      `INSERT INTO admins (user_id, access_level, original_role) VALUES ($1, $2, $3)
-       ON CONFLICT (user_id) DO UPDATE SET access_level = $2, original_role = COALESCE(admins.original_role, EXCLUDED.original_role)`,
-      [target.user_id, target_level, target.role === 'admin' ? (target.original_role || 'rider') : target.role]
-    );
-    await client.query("COMMIT");
-    await logAdminAction(req.user.id, `Set ${target.name} (ID: ${target.user_id}) level to ${target_level}`);
+    await pool.query("CALL sp_promote_user($1, $2, $3, $4)", [target.user_id, target_level, req.user.id, req.user.name]);
     res.json({ message: `${target.name} level set to ${target_level} successfully` });
   } catch (err: any) {
-    await client.query("ROLLBACK");
     console.error("Promote error:", err);
     res.status(500).json({ message: err.message });
-  } finally {
-    client.release();
   }
 });
 
@@ -477,10 +446,9 @@ router.post("/demote/:userId", authenticateAdmin, async (req: any, res: any) => 
     return res.status(400).json({ message: "You cannot demote yourself." });
   }
 
-  const client = await pool.connect();
   try {
-    const adminRes = await client.query(
-      `SELECT a.original_role, a.access_level, u.name FROM admins a JOIN users u ON u.user_id = a.user_id WHERE a.user_id = $1`,
+    const adminRes = await pool.query(
+      `SELECT a.access_level, u.name FROM admins a JOIN users u ON u.user_id = a.user_id WHERE a.user_id = $1`,
       [userId]
     );
 
@@ -495,20 +463,11 @@ router.post("/demote/:userId", authenticateAdmin, async (req: any, res: any) => 
       return res.status(403).json({ message: "You cannot demote an admin with a level higher than or equal to yours." });
     }
 
-    const restoreRole = target.original_role || 'rider';
-
-    await client.query("BEGIN");
-    await client.query("DELETE FROM admins WHERE user_id = $1", [userId]);
-    await client.query("UPDATE users SET role = $1, token_version = token_version + 1 WHERE user_id = $2", [restoreRole, userId]);
-    await client.query("COMMIT");
-    await logAdminAction(req.user.id, `Demoted ${target.name} (ID: ${userId}) from admin back to ${restoreRole}`);
-    res.json({ message: `${target.name} successfully demoted back to ${restoreRole}` });
+    await pool.query("CALL sp_demote_admin($1, $2, $3)", [userId, req.user.id, req.user.name]);
+    res.json({ message: `${target.name} successfully demoted` });
   } catch (err: any) {
-    await client.query("ROLLBACK");
     console.error("Demote error:", err);
     res.status(500).json({ message: err.message });
-  } finally {
-    client.release();
   }
 });
 

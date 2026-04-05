@@ -108,84 +108,23 @@ router.post("/request", authenticateToken, async (req: any, res: any) => {
     return res.status(400).json({ message: "vehicle_type_id is required" });
   }
   const rider_id = req.user.id;
-  const client = await pool.connect();
 
   try {
-    await client.query("BEGIN");
-
-    const pickupLocId = await insertLocation(client, pickup_lat, pickup_lng, pickup_address);
-    const dropoffLocId = await insertLocation(client, dropoff_lat, dropoff_lng, dropoff_address);
-
-    let fare = 0;
-    const vType = await client.query("SELECT * FROM vehicle_types WHERE vehicle_type_id = $1", [vehicle_type_id]);
-    if (vType.rows.length > 0) {
-      const v = vType.rows[0];
-      const dist = distance_km || 0;
-      let calculatedFare = Number(v.base_fare) + (dist * Number(v.fare_per_km));
-      fare = Math.max(calculatedFare, Number(v.minimum_fare));
-    }
-
-    let discount_amount = 0;
-    let promo_id = null;
-
-    if (coupon_code) {
-      const promoRes = await client.query(
-        `SELECT p.* FROM promotions p
-         LEFT JOIN user_coupons uc ON p.promo_id = uc.promo_id AND uc.user_id = $1
-         WHERE p.code = $2 AND (uc.is_used IS FALSE OR uc.is_used IS NULL) 
-         AND p.is_active = TRUE AND (p.expiry_date >= CURRENT_DATE OR p.expiry_date IS NULL)
-         AND (p.is_public = TRUE OR uc.user_id IS NOT NULL)`,
-        [rider_id, coupon_code]
-      );
-
-      if (promoRes.rows.length > 0) {
-        const promo = promoRes.rows[0];
-        if (fare >= Number(promo.min_fare_amount)) {
-          promo_id = promo.promo_id;
-          if (promo.discount_type === 'percentage') {
-            discount_amount = (fare * Number(promo.value)) / 100;
-            if (promo.max_discount_amount) {
-              discount_amount = Math.min(discount_amount, Number(promo.max_discount_amount));
-            }
-          } else {
-            discount_amount = Number(promo.value);
-          }
-        }
-      }
-    }
-
-    const reqResult = await client.query(
-      `INSERT INTO ride_requests (rider_id, vehicle_type_id, status) VALUES ($1, $2, 'pending') RETURNING request_id`,
-      [rider_id, vehicle_type_id]
-    );
-    const request_id = reqResult.rows[0].request_id;
-
-    await client.query(
-      `INSERT INTO rides (request_id, driver_id, pickup_location_id, dropoff_location_id, status, distance, fare, duration, applied_promo_id, discount_amount)
-       VALUES ($1, NULL, $2, $3, 'ongoing', $4, $5, $6, $7, $8)`,
-      [request_id, pickupLocId, dropoffLocId, distance_km || 0, fare, duration || 0, promo_id, discount_amount]
+    const result = await pool.query(
+      `SELECT * FROM fn_request_ride($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        rider_id, 
+        pickup_lat, pickup_lng, pickup_address, 
+        dropoff_lat, dropoff_lng, dropoff_address, 
+        vehicle_type_id, distance_km || 0, duration || 0, coupon_code || null
+      ]
     );
 
-    // If a coupon was applied, mark it as used immediately to prevent double usage 
-    // (though in some systems you'd mark it used only upon completion, 
-    // here we mark it at request but should revert if cancelled)
-    if (promo_id) {
-       await client.query(
-         `INSERT INTO user_coupons (user_id, promo_id, is_used) 
-          VALUES ($1, $2, TRUE)
-          ON CONFLICT (user_id, promo_id) DO UPDATE SET is_used = TRUE`, 
-         [rider_id, promo_id]
-       );
-    }
-
-    await client.query("COMMIT");
-    res.status(201).json({ request_id, status: "pending", discount: discount_amount, final_fare: fare - discount_amount });
+    const { req_id, req_status, discount, final_fare } = result.rows[0];
+    res.status(201).json({ request_id: req_id, status: req_status, discount, final_fare });
   } catch (err: any) {
-    await client.query("ROLLBACK");
     console.error("Ride request error:", err);
     res.status(500).json({ message: err.message });
-  } finally {
-    client.release();
   }
 });
 
@@ -273,24 +212,11 @@ router.delete("/cancel/:requestId", authenticateToken, async (req: any, res: any
   const { requestId } = req.params;
   const rider_id = req.user.id;
   try {
-    const reqUpdate = await pool.query(
-      "UPDATE ride_requests SET status = 'cancelled' WHERE request_id = $1 AND rider_id = $2 AND status = 'pending' RETURNING request_id",
-      [requestId, rider_id]
-    );
-
-    if (reqUpdate.rows.length === 0) {
-      return res.status(404).json({ message: "No pending request found to cancel." });
-    }
-
-    await pool.query(
-      "UPDATE rides SET status = 'cancelled' WHERE request_id = $1 AND driver_id IS NULL",
-      [reqUpdate.rows[0].request_id]
-    );
-
+    await pool.query("CALL sp_rider_cancel_request($1, $2)", [requestId, rider_id]);
     res.json({ message: "Request cancelled" });
   } catch (err: any) {
     console.error("Cancel request error:", err);
-    res.status(500).json({ message: err.message });
+    res.status(err.message.includes('No pending request found') ? 404 : 500).json({ message: err.message });
   }
 });
 
@@ -360,38 +286,11 @@ router.get("/activity", authenticateToken, async (req: any, res: any) => {
 router.post("/accept/:requestId", authenticateToken, async (req: any, res: any) => {
   const { requestId } = req.params;
   const driver_id = req.user.id;
-  const client = await pool.connect();
 
   try {
-    await client.query("BEGIN");
-
-    const reqCheck = await client.query(
-      "SELECT request_id FROM ride_requests WHERE request_id = $1 AND status = 'pending' FOR UPDATE",
-      [requestId]
-    );
-
-    if (reqCheck.rows.length === 0) {
-      await client.query("ROLLBACK");
-      return res.status(409).json({ message: "Request no longer available" });
-    }
-
-    await client.query(
-      "UPDATE ride_requests SET status = 'accepted' WHERE request_id = $1",
-      [requestId]
-    );
-
-    const rideResult = await client.query(
-      `UPDATE rides SET driver_id = $1, start_time = NOW(), updated_at = NOW()
-       WHERE request_id = $2 AND driver_id IS NULL
-       RETURNING ride_id`,
-      [driver_id, requestId]
-    );
-
-    await client.query("COMMIT");
-    
-    const driverResult = await pool.query("SELECT name FROM users WHERE user_id = $1", [driver_id]);
-    const driver_name = driverResult.rows[0]?.name;
-    const ride_id = rideResult.rows[0]?.ride_id;
+    const result = await pool.query("SELECT * FROM sp_accept_ride($1, $2)", [requestId, driver_id]);
+    const ride_id = result.rows[0].ride_id;
+    const driver_name = result.rows[0].driver_name;
     
     // Notify the rider immediately that the request is accepted
     io.to(`request_${requestId}`).emit("ride_status_update", { 
@@ -403,11 +302,8 @@ router.post("/accept/:requestId", authenticateToken, async (req: any, res: any) 
     
     res.json({ ride_id, message: "Ride accepted!" });
   } catch (err: any) {
-    await client.query("ROLLBACK");
     console.error("Accept ride error:", err);
-    res.status(500).json({ message: err.message });
-  } finally {
-    client.release();
+    res.status(err.message === 'Request no longer available' ? 409 : 500).json({ message: err.message });
   }
 });
 
@@ -440,130 +336,35 @@ router.get("/my-ride", authenticateToken, async (req: any, res: any) => {
 router.post("/complete/:rideId", authenticateToken, async (req: any, res: any) => {
   const { rideId } = req.params;
   const driver_id = req.user.id;
-  const client = await pool.connect();
   
   try {
-    await client.query("BEGIN");
-
-    const rideRes = await client.query(
-      `SELECT r.status, r.fare, r.discount_amount, rq.rider_id 
-       FROM rides r 
-       JOIN ride_requests rq ON r.request_id = rq.request_id
-       WHERE r.ride_id = $1 AND r.driver_id = $2 FOR UPDATE`,
-      [rideId, driver_id]
-    );
-
-    if (rideRes.rows.length === 0) {
-       await client.query("ROLLBACK");
-       return res.status(404).json({ message: "Active ride not found" });
-    }
-    
-    if (rideRes.rows[0].status !== 'ongoing') {
-       await client.query("ROLLBACK");
-       return res.status(400).json({ message: "Ride is not ongoing" });
-    }
-
-    const { fare, discount_amount, rider_id } = rideRes.rows[0];
-
-    await client.query(
-      `UPDATE rides SET status = 'completed', end_time = NOW(), updated_at = NOW()
-       WHERE ride_id = $1`,
-      [rideId]
-    );
-
-    if (fare && Number(fare) > 0) {
-       let riderWallet = await client.query(`SELECT wallet_id FROM wallets WHERE user_id = $1 FOR UPDATE`, [rider_id]);
-       if (riderWallet.rows.length === 0) {
-         riderWallet = await client.query(`INSERT INTO wallets (user_id, balance) VALUES ($1, 0.00) RETURNING wallet_id`, [rider_id]);
-       }
-       const r_wallet_id = riderWallet.rows[0].wallet_id;
-
-       let driverWallet = await client.query(`SELECT wallet_id FROM wallets WHERE user_id = $1 FOR UPDATE`, [driver_id]);
-       if (driverWallet.rows.length === 0) {
-         driverWallet = await client.query(`INSERT INTO wallets (user_id, balance) VALUES ($1, 0.00) RETURNING wallet_id`, [driver_id]);
-       }
-       const d_wallet_id = driverWallet.rows[0].wallet_id;
-
-       // Rider pays (Original Fare - Discount)
-       const finalRiderCost = Number(fare) - Number(discount_amount || 0);
-
-       await client.query(`UPDATE wallets SET balance = balance - $1, updated_at = NOW() WHERE wallet_id = $2`, [finalRiderCost, r_wallet_id]);
-       await client.query(
-         `INSERT INTO transactions (wallet_id, ride_id, type, amount, status, payment_method) VALUES ($1, $2, 'debit', $3, 'completed', 'Wallet')`,
-         [r_wallet_id, rideId, finalRiderCost]
-       );
-
-       // Driver gets 80% commission
-       await client.query(`UPDATE wallets SET balance = balance + $1, updated_at = NOW() WHERE wallet_id = $2`, [0.8*fare, d_wallet_id]);
-       await client.query(
-         `INSERT INTO transactions (wallet_id, ride_id, type, amount, status, payment_method) VALUES ($1, $2, 'credit', $3, 'completed', 'Wallet')`,
-         [d_wallet_id, rideId, 0.8*fare]
-       );
-    }
-
-    await client.query("COMMIT");
+    const result = await pool.query("CALL sp_complete_ride($1, $2, null)", [rideId, driver_id]);
+    const rider_id = result.rows[0]?.p_rider_id;
     
     io.to(`ride_${rideId}`).emit("ride_status_update", { 
       status: 'completed', 
       ride_id: Number(rideId),
-      rider_id: Number(rider_id),
+      rider_id: rider_id ? Number(rider_id) : null,
       driver_id: Number(driver_id)
     });
     
     res.json({ message: "Ride completed!" });
   } catch (err: any) {
-    await client.query("ROLLBACK");
     console.error("Complete ride error:", err);
-    res.status(500).json({ message: err.message });
-  } finally {
-    client.release();
+    res.status(err.message.includes('not found') ? 404 : (err.message.includes('ongoing') ? 400 : 500)).json({ message: err.message });
   }
 });
 
 router.post("/driver-cancel/:rideId", authenticateToken, async (req: any, res: any) => {
   const { rideId } = req.params;
   const driver_id = req.user.id;
-  const client = await pool.connect();
-
   try {
-    await client.query("BEGIN");
-
-    const rideResult = await client.query(
-      `UPDATE rides SET status = 'cancelled', updated_at = NOW()
-       WHERE ride_id = $1 AND driver_id = $2 AND status = 'ongoing'
-       RETURNING request_id`,
-      [rideId, driver_id]
-    );
-
-    if (rideResult.rows.length === 0) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ message: "Ongoing ride not found" });
-    }
-
-    const requestId = rideResult.rows[0].request_id;
-
-    await client.query(
-      "UPDATE ride_requests SET status = 'cancelled' WHERE request_id = $1",
-      [requestId]
-    );
-
-    await client.query(
-      "INSERT INTO ride_cancellations (ride_id, cancelled_by, reason) VALUES ($1, 'driver', 'Driver initiated cancellation')",
-      [rideId]
-    );
-
-    await client.query("COMMIT");
-    
-    // Notify clients that the ride is cancelled
+    await pool.query("CALL sp_driver_cancel_ride($1, $2)", [rideId, driver_id]);
     io.to(`ride_${rideId}`).emit("ride_status_update", { status: 'cancelled' });
-    
     res.json({ message: "Ride cancelled by driver" });
   } catch (err: any) {
-    await client.query("ROLLBACK");
     console.error("Driver cancel error:", err);
-    res.status(500).json({ message: err.message });
-  } finally {
-    client.release();
+    res.status(err.message.includes('not found') ? 404 : 500).json({ message: err.message });
   }
 });
 
@@ -611,75 +412,17 @@ router.post("/review/:rideId", authenticateToken, async (req: any, res: any) => 
   const { rating, comment } = req.body;
   const caller_id = req.user.id;
 
-  if (!rating || rating < 1 || rating > 5) {
-    return res.status(400).json({ message: "Rating must be between 1 and 5" });
-  }
-
-  const client = await pool.connect();
   try {
-    // Verify ride is completed and caller is part of it
-    const rideRes = await client.query(
-      `SELECT r.ride_id, r.status, r.driver_id, rq.rider_id
-       FROM rides r
-       JOIN ride_requests rq ON rq.request_id = r.request_id
-       WHERE r.ride_id = $1`,
-      [rideId]
-    );
-
-    if (rideRes.rows.length === 0) {
-      return res.status(404).json({ message: "Ride not found" });
-    }
-
-    const ride = rideRes.rows[0];
-
-    if (ride.status !== 'completed') {
-      return res.status(400).json({ message: "Can only review completed rides" });
-    }
-
-    const isRider = Number(ride.rider_id) === Number(caller_id);
-    const isDriver = Number(ride.driver_id) === Number(caller_id);
-
-    if (!isRider && !isDriver) {
-      return res.status(403).json({ message: "Not part of this ride" });
-    }
-
-    const review_type = isRider ? 'rider_to_driver' : 'driver_to_rider';
-
-    // Check for duplicate review
-    const dupCheck = await client.query(
-      `SELECT 1 FROM reviews WHERE ride_id = $1 AND author_id = $2`,
-      [rideId, caller_id]
-    );
-
-    if (dupCheck.rows.length > 0) {
-      return res.status(409).json({ message: "You have already reviewed this ride" });
-    }
-
-    await client.query(
-      `INSERT INTO reviews (ride_id, author_id, rating, comment, review_type)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [rideId, caller_id, rating, comment || null, review_type]
-    );
-
-    // If rider reviewed the driver, update driver's avg rating
-    if (isRider && ride.driver_id) {
-      await client.query(
-        `UPDATE drivers SET rating = (
-           SELECT ROUND(AVG(rev.rating)::numeric, 2)
-           FROM reviews rev
-           JOIN rides r2 ON rev.ride_id = r2.ride_id
-           WHERE r2.driver_id = $1 AND rev.review_type = 'rider_to_driver'
-         ) WHERE user_id = $1`,
-        [ride.driver_id]
-      );
-    }
-
+    await pool.query("CALL sp_submit_review($1, $2, $3, $4)", [rideId, caller_id, rating, comment || null]);
     res.status(201).json({ message: "Review submitted successfully" });
   } catch (err: any) {
     console.error("Submit review error:", err);
-    res.status(500).json({ message: err.message });
-  } finally {
-    client.release();
+    let code = 500;
+    if (err.message.includes('Rating must be between')) code = 400;
+    else if (err.message.includes('Ride not found')) code = 404;
+    else if (err.message.includes('Can only review completed') || err.message.includes('already reviewed')) code = 400;
+    else if (err.message.includes('Not part of this ride')) code = 403;
+    res.status(code).json({ message: err.message });
   }
 });
 

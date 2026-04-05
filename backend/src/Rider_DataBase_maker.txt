@@ -345,6 +345,296 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE PROCEDURE reject_driver_application(p_driver_id BIGINT, p_admin_id BIGINT)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    DELETE FROM vehicles WHERE driver_id = p_driver_id;
+    DELETE FROM drivers WHERE user_id = p_driver_id;
+    DELETE FROM wallets WHERE user_id = p_driver_id;
+    DELETE FROM users WHERE user_id = p_driver_id;
+    
+    INSERT INTO admin_actions (admin_id, action_description) 
+    VALUES (p_admin_id, 'Declined & deleted driver application ' || p_driver_id);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION get_driver_total_earnings(p_driver_id BIGINT)
+RETURNS NUMERIC
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    total_earnings NUMERIC := 0.00;
+BEGIN
+    SELECT COALESCE(SUM(amount), 0.00) INTO total_earnings 
+    FROM transactions t
+    JOIN wallets w ON t.wallet_id = w.wallet_id
+    WHERE w.user_id = p_driver_id AND t.type = 'credit' AND t.status = 'completed';
+    
+    RETURN total_earnings;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_request_ride(
+    p_rider_id BIGINT,
+    p_pickup_lat NUMERIC, p_pickup_lng NUMERIC, p_pickup_address TEXT,
+    p_dropoff_lat NUMERIC, p_dropoff_lng NUMERIC, p_dropoff_address TEXT,
+    p_vehicle_type_id BIGINT,
+    p_distance_km NUMERIC,
+    p_duration NUMERIC,
+    p_coupon_code VARCHAR(50)
+) RETURNS TABLE(req_id BIGINT, req_status VARCHAR, discount NUMERIC, final_fare NUMERIC)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_pickup_loc_id BIGINT;
+    v_dropoff_loc_id BIGINT;
+    v_fare NUMERIC := 0.00;
+    v_discount_amount NUMERIC := 0.00;
+    v_promo_id BIGINT := NULL;
+    v_base_fare NUMERIC; v_fare_per_km NUMERIC; v_minimum_fare NUMERIC;
+    v_calculated_fare NUMERIC;
+    v_promo_record RECORD;
+    v_request_id BIGINT;
+BEGIN
+    INSERT INTO locations (latitude, longitude, address) VALUES (p_pickup_lat, p_pickup_lng, p_pickup_address) RETURNING location_id INTO v_pickup_loc_id;
+    INSERT INTO locations (latitude, longitude, address) VALUES (p_dropoff_lat, p_dropoff_lng, p_dropoff_address) RETURNING location_id INTO v_dropoff_loc_id;
+
+    SELECT base_fare, fare_per_km, minimum_fare INTO v_base_fare, v_fare_per_km, v_minimum_fare
+    FROM vehicle_types WHERE vehicle_type_id = p_vehicle_type_id;
+
+    v_calculated_fare := v_base_fare + (COALESCE(p_distance_km, 0) * v_fare_per_km);
+    v_fare := GREATEST(v_calculated_fare, v_minimum_fare);
+
+    IF p_coupon_code IS NOT NULL AND p_coupon_code != '' THEN
+        SELECT p.* INTO v_promo_record
+        FROM promotions p
+        LEFT JOIN user_coupons uc ON p.promo_id = uc.promo_id AND uc.user_id = p_rider_id
+        WHERE p.code = p_coupon_code AND (uc.is_used IS FALSE OR uc.is_used IS NULL)
+        AND p.is_active = TRUE AND (p.expiry_date >= CURRENT_DATE OR p.expiry_date IS NULL)
+        AND (p.is_public = TRUE OR uc.user_id IS NOT NULL);
+
+        IF FOUND AND v_fare >= COALESCE(v_promo_record.min_fare_amount, 0) THEN
+            v_promo_id := v_promo_record.promo_id;
+            IF v_promo_record.discount_type = 'percentage' THEN
+                v_discount_amount := (v_fare * v_promo_record.value) / 100;
+                IF v_promo_record.max_discount_amount IS NOT NULL THEN
+                    v_discount_amount := LEAST(v_discount_amount, v_promo_record.max_discount_amount);
+                END IF;
+            ELSE
+                v_discount_amount := v_promo_record.value;
+            END IF;
+        END IF;
+    END IF;
+
+    INSERT INTO ride_requests (rider_id, vehicle_type_id, status)
+    VALUES (p_rider_id, p_vehicle_type_id, 'pending') RETURNING request_id INTO v_request_id;
+
+    INSERT INTO rides (request_id, driver_id, pickup_location_id, dropoff_location_id, status, distance, fare, duration, applied_promo_id, discount_amount)
+    VALUES (v_request_id, NULL, v_pickup_loc_id, v_dropoff_loc_id, 'ongoing', COALESCE(p_distance_km, 0), v_fare, COALESCE(p_duration, 0), v_promo_id, v_discount_amount);
+
+    IF v_promo_id IS NOT NULL THEN
+        INSERT INTO user_coupons (user_id, promo_id, is_used)
+        VALUES (p_rider_id, v_promo_id, TRUE)
+        ON CONFLICT (user_id, promo_id) DO UPDATE SET is_used = TRUE;
+    END IF;
+
+    RETURN QUERY SELECT v_request_id, 'pending'::VARCHAR, v_discount_amount, (v_fare - v_discount_amount);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION sp_accept_ride(p_request_id BIGINT, p_driver_id BIGINT)
+RETURNS TABLE (ride_id BIGINT, driver_name VARCHAR)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_req_id BIGINT;
+    v_ride_id BIGINT;
+    v_driver_name VARCHAR;
+BEGIN
+    SELECT request_id INTO v_req_id FROM ride_requests WHERE request_id = p_request_id AND status = 'pending' FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Request no longer available'; END IF;
+
+    UPDATE ride_requests SET status = 'accepted' WHERE request_id = p_request_id;
+    
+    UPDATE rides SET driver_id = p_driver_id, start_time = NOW(), updated_at = NOW()
+    WHERE request_id = p_request_id AND driver_id IS NULL
+    RETURNING rides.ride_id INTO v_ride_id;
+    
+    SELECT name INTO v_driver_name FROM users WHERE user_id = p_driver_id;
+    
+    RETURN QUERY SELECT v_ride_id, v_driver_name;
+END;
+$$;
+
+CREATE OR REPLACE PROCEDURE sp_complete_ride(p_ride_id BIGINT, p_driver_id BIGINT, OUT p_rider_id BIGINT)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_status VARCHAR; v_fare NUMERIC; v_discount_amount NUMERIC;
+    v_r_wallet_id BIGINT; v_d_wallet_id BIGINT;
+    v_final_rider_cost NUMERIC; v_driver_pay NUMERIC;
+BEGIN
+    SELECT r.status, r.fare, r.discount_amount, rq.rider_id 
+    INTO v_status, v_fare, v_discount_amount, p_rider_id
+    FROM rides r JOIN ride_requests rq ON r.request_id = rq.request_id
+    WHERE r.ride_id = p_ride_id AND r.driver_id = p_driver_id FOR UPDATE;
+
+    IF NOT FOUND THEN RAISE EXCEPTION 'Active ride not found'; END IF;
+    IF v_status != 'ongoing' THEN RAISE EXCEPTION 'Ride is not ongoing'; END IF;
+
+    UPDATE rides SET status = 'completed', end_time = NOW(), updated_at = NOW() WHERE ride_id = p_ride_id;
+
+    IF COALESCE(v_fare, 0) > 0 THEN
+        SELECT wallet_id INTO v_r_wallet_id FROM wallets WHERE user_id = p_rider_id FOR UPDATE;
+        IF NOT FOUND THEN
+            INSERT INTO wallets (user_id, balance) VALUES (p_rider_id, 0.00) RETURNING wallet_id INTO v_r_wallet_id;
+        END IF;
+
+        SELECT wallet_id INTO v_d_wallet_id FROM wallets WHERE user_id = p_driver_id FOR UPDATE;
+        IF NOT FOUND THEN
+            INSERT INTO wallets (user_id, balance) VALUES (p_driver_id, 0.00) RETURNING wallet_id INTO v_d_wallet_id;
+        END IF;
+
+        v_final_rider_cost := v_fare - COALESCE(v_discount_amount, 0);
+        v_driver_pay := v_fare * 0.8;
+
+        UPDATE wallets SET balance = balance - v_final_rider_cost, updated_at = NOW() WHERE wallet_id = v_r_wallet_id;
+        INSERT INTO transactions (wallet_id, ride_id, type, amount, status, payment_method) 
+        VALUES (v_r_wallet_id, p_ride_id, 'debit', v_final_rider_cost, 'completed', 'Wallet');
+
+        UPDATE wallets SET balance = balance + v_driver_pay, updated_at = NOW() WHERE wallet_id = v_d_wallet_id;
+        INSERT INTO transactions (wallet_id, ride_id, type, amount, status, payment_method) 
+        VALUES (v_d_wallet_id, p_ride_id, 'credit', v_driver_pay, 'completed', 'Wallet');
+    END IF;
+END;
+$$;
+
+CREATE OR REPLACE PROCEDURE sp_driver_cancel_ride(p_ride_id BIGINT, p_driver_id BIGINT)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_request_id BIGINT;
+BEGIN
+    UPDATE rides SET status = 'cancelled', updated_at = NOW()
+    WHERE ride_id = p_ride_id AND driver_id = p_driver_id AND status = 'ongoing'
+    RETURNING request_id INTO v_request_id;
+    
+    IF NOT FOUND THEN RAISE EXCEPTION 'Ongoing ride not found'; END IF;
+
+    UPDATE ride_requests SET status = 'cancelled' WHERE request_id = v_request_id;
+    INSERT INTO ride_cancellations (ride_id, cancelled_by, reason) 
+    VALUES (p_ride_id, 'driver', 'Driver initiated cancellation');
+END;
+$$;
+
+CREATE OR REPLACE PROCEDURE sp_rider_cancel_request(p_request_id BIGINT, p_rider_id BIGINT)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_req_id BIGINT;
+BEGIN
+    UPDATE ride_requests SET status = 'cancelled' 
+    WHERE request_id = p_request_id AND rider_id = p_rider_id AND status = 'pending' 
+    RETURNING request_id INTO v_req_id;
+
+    IF NOT FOUND THEN RAISE EXCEPTION 'No pending request found to cancel.'; END IF;
+
+    UPDATE rides SET status = 'cancelled' WHERE request_id = v_req_id AND driver_id IS NULL;
+END;
+$$;
+
+CREATE OR REPLACE PROCEDURE sp_submit_review(p_ride_id BIGINT, p_caller_id BIGINT, p_rating SMALLINT, p_comment TEXT)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_status VARCHAR; v_driver_id BIGINT; v_rider_id BIGINT;
+    v_is_rider BOOLEAN; v_is_driver BOOLEAN;
+    v_review_type review_type;
+BEGIN
+    IF p_rating < 1 OR p_rating > 5 THEN RAISE EXCEPTION 'Rating must be between 1 and 5'; END IF;
+
+    SELECT r.status, r.driver_id, rq.rider_id INTO v_status, v_driver_id, v_rider_id
+    FROM rides r JOIN ride_requests rq ON r.request_id = rq.request_id
+    WHERE r.ride_id = p_ride_id;
+
+    IF NOT FOUND THEN RAISE EXCEPTION 'Ride not found'; END IF;
+    IF v_status != 'completed' THEN RAISE EXCEPTION 'Can only review completed rides'; END IF;
+
+    v_is_rider := (v_rider_id = p_caller_id);
+    v_is_driver := (v_driver_id = p_caller_id);
+
+    IF NOT v_is_rider AND NOT v_is_driver THEN RAISE EXCEPTION 'Not part of this ride'; END IF;
+
+    IF v_is_rider THEN v_review_type := 'rider_to_driver'; ELSE v_review_type := 'driver_to_rider'; END IF;
+
+    IF EXISTS (SELECT 1 FROM reviews WHERE ride_id = p_ride_id AND author_id = p_caller_id) THEN
+        RAISE EXCEPTION 'You have already reviewed this ride';
+    END IF;
+
+    INSERT INTO reviews (ride_id, author_id, rating, comment, review_type)
+    VALUES (p_ride_id, p_caller_id, p_rating, p_comment, v_review_type);
+
+    IF v_is_rider AND v_driver_id IS NOT NULL THEN
+        UPDATE drivers SET rating = (
+            SELECT ROUND(AVG(rev.rating)::numeric, 2)
+            FROM reviews rev JOIN rides r2 ON rev.ride_id = r2.ride_id
+            WHERE r2.driver_id = v_driver_id AND rev.review_type = 'rider_to_driver'
+        ) WHERE user_id = v_driver_id;
+    END IF;
+END;
+$$;
+
+CREATE OR REPLACE PROCEDURE sp_verify_driver(p_driver_id BIGINT, p_admin_id BIGINT, p_admin_name TEXT)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    UPDATE drivers SET is_verified = TRUE, created_at = CURRENT_TIMESTAMP WHERE user_id = p_driver_id;
+    INSERT INTO admin_actions (admin_id, action_description) VALUES (p_admin_id, 'Admin ' || p_admin_name || ' verified driver with ID ' || p_driver_id);
+END;
+$$;
+
+CREATE OR REPLACE PROCEDURE sp_promote_user(p_target_id BIGINT, p_target_level INT, p_admin_id BIGINT, p_admin_name TEXT)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_role user_role;
+    v_original_role user_role;
+    v_target_name VARCHAR;
+BEGIN
+    SELECT u.role, u.name, a.original_role INTO v_role, v_target_name, v_original_role 
+    FROM users u LEFT JOIN admins a ON a.user_id = u.user_id
+    WHERE u.user_id = p_target_id;
+    
+    UPDATE users SET role = 'admin', token_version = token_version + 1 WHERE user_id = p_target_id;
+    
+    INSERT INTO admins (user_id, access_level, original_role) 
+    VALUES (p_target_id, p_target_level, CASE WHEN v_role = 'admin' THEN COALESCE(v_original_role, 'rider'::user_role) ELSE v_role END)
+    ON CONFLICT (user_id) DO UPDATE SET access_level = p_target_level, original_role = CASE WHEN EXCLUDED.original_role IS NOT NULL THEN EXCLUDED.original_role ELSE admins.original_role END;
+    
+    INSERT INTO admin_actions (admin_id, action_description) 
+    VALUES (p_admin_id, 'Set ' || v_target_name || ' (ID: ' || p_target_id || ') level to ' || p_target_level);
+END;
+$$;
+
+CREATE OR REPLACE PROCEDURE sp_demote_admin(p_target_id BIGINT, p_admin_id BIGINT, p_admin_name TEXT)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_restore_role user_role;
+    v_target_name VARCHAR;
+BEGIN
+    SELECT a.original_role, u.name INTO v_restore_role, v_target_name
+    FROM admins a JOIN users u ON u.user_id = a.user_id WHERE a.user_id = p_target_id;
+    
+    DELETE FROM admins WHERE user_id = p_target_id;
+    UPDATE users SET role = CAST(COALESCE(v_restore_role, 'rider'::user_role) AS user_role), token_version = token_version + 1 WHERE user_id = p_target_id;
+    
+    INSERT INTO admin_actions (admin_id, action_description) 
+    VALUES (p_admin_id, 'Demoted ' || v_target_name || ' (ID: ' || p_target_id || ') from admin back to ' || v_restore_role);
+END;
+$$;
+
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_phone ON users(phone);
 CREATE INDEX idx_rides_driver ON rides(driver_id);
