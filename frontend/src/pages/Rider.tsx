@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { config } from '../config';
 import './Rider.css';
 import LocationSearch from '../components/map/LocationSearch';
 import type { LocationData } from '../components/map/LocationSearch';
@@ -155,7 +156,7 @@ export default function Rider() {
   }, []);
 
   useEffect(() => {
-    const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:4000', { 
+    const socket = io(config.API_URL, { 
       withCredentials: true 
     });
     socketRef.current = socket;

@@ -1,5 +1,7 @@
+import "dotenv/config";
+
 async function testFlow() {
-  const BASE_URL = "http://localhost:4000/api";
+  const BASE_URL = process.env.API_URL || "http://localhost:4000/api";
 
   console.log("1. Authenticating accounts...");
   

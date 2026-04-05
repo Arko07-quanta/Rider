@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import './Driver.css';
 import { io, Socket } from 'socket.io-client';
+import { config } from '../config';
 import RouteMap from '../components/map/RouteMap';
 import RideItem, { type RideData } from '../components/rides/RideItem';
 import Chat from '../components/chat/Chat';
@@ -134,7 +135,7 @@ export default function Driver() {
   }, []);
 
   useEffect(() => {
-    const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:4000', { 
+    const socket = io(config.API_URL, { 
       withCredentials: true 
     });
     socketRef.current = socket;

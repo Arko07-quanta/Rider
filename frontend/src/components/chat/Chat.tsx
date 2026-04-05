@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { config } from '../../config';
 import api from '../../api/axios';
 import ReviewModal from '../reviews/ReviewModal';
 import './Chat.css';
@@ -42,7 +43,7 @@ export default function Chat({ rideId, theirName, theirUserId, rideStatus }: Cha
     if (isOpen) {
       fetchMessages();
       
-      socket = io(import.meta.env.VITE_API_URL || 'http://localhost:4000', {
+      socket = io(config.API_URL, {
         withCredentials: true,
       });
 
