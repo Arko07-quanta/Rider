@@ -168,15 +168,10 @@ export default function Driver() {
       socket.emit('join_request', activeRide.request_id);
 
       socket.on('ride_status_update', (data: any) => {
-        if (data.status === 'cancelled' || data.status === 'searching') {
-          setPhase('searching');
-          setActiveRide(null);
-          fetchHistory();
-          if (!pollRef.current) {
-            pollRef.current = setInterval(pollPendingRequests, 4000);
-          }
-        } else if (data.status === 'completed' && data.ride_id && data.rider_id) {
-          setReviewRideData({ userId: data.rider_id, rideId: data.ride_id });
+        // Only handle external overrides if needed, but currently 
+        // the Driver transitions these manually for immediate feedback.
+        // We keep the listener for potential future server-side overrides.
+        if (data.status === 'searching') {
           setPhase('searching');
           setActiveRide(null);
           fetchHistory();

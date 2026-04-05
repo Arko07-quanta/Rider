@@ -110,7 +110,7 @@ export default function Rider() {
       const updatedMatch = requests.find(r => r.request_id === selectedHistoryRide.request_id);
       if (updatedMatch) {
          if (selectedHistoryRide.ride_status === 'ongoing' && (updatedMatch.ride_status === 'completed' || updatedMatch.ride_status === 'cancelled')) {
-             setSelectedHistoryRide(null); 
+             setSelectedHistoryRide(null);
          } else if (
            updatedMatch.ride_status !== selectedHistoryRide.ride_status || 
            updatedMatch.request_status !== selectedHistoryRide.request_status
@@ -145,8 +145,10 @@ export default function Rider() {
     if (!socket || !socket.connected) return;
     const reqs = requestsRef.current;
     reqs.forEach(req => {
-      socket.emit("join_request", req.request_id);
-      if (req.ride_id) {
+      if (req.request_status === 'pending') {
+        socket.emit("join_request", req.request_id);
+      }
+      if (req.ride_id && req.ride_status === 'ongoing') {
         socket.emit("join_ride", req.ride_id);
       }
     });
@@ -187,36 +189,6 @@ export default function Rider() {
     }
   }, [requests, syncRooms]);
 
-  // Redundancy Trigger for Review Modal (if socket event is missed)
-  useEffect(() => {
-    const checkAndShowReviewModal = async () => {
-      const completedRide = requests.find(r => r.ride_status === 'completed' && r.ride_id && r.driver_user_id);
-      if (!completedRide || !completedRide.ride_id || !completedRide.driver_user_id || reviewRideData) {
-        return;
-      }
-      
-      // Check if we've already shown the modal for this ride this session
-      if (completedRide.ride_id === lastHandledReviewRideId.current) {
-        return;
-      }
-      
-      // Check if the ride was already reviewed on the server
-      try {
-        const url = `/api/rides/profile/${completedRide.driver_user_id}?rideId=${completedRide.ride_id}`;
-        const { data } = await api.get(url);
-        
-        // Only show modal if the user hasn't reviewed this ride yet
-        if (!data.has_reviewed) {
-          setReviewRideData({ userId: completedRide.driver_user_id, rideId: completedRide.ride_id });
-          lastHandledReviewRideId.current = completedRide.ride_id;
-        }
-      } catch (err) {
-        console.error('Failed to check review status:', err);
-      }
-    };
-    
-    checkAndShowReviewModal();
-  }, [requests, reviewRideData]);
 
   // Scroll to new request when it appears (with delay for DOM render)
   useEffect(() => {
@@ -335,6 +307,7 @@ export default function Rider() {
     return () => stopPolling();
   }, [requests, phase, checkState, stopPolling]);
 
+
   useEffect(() => {
     fetchHistory();
     fetchWallet();
@@ -371,6 +344,7 @@ export default function Rider() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showCouponModal]);
+  
 
   const handleRouteCalculated = (dist: string, dur: string, distVal: number, durVal: number) => {
     setDistance(dist);
